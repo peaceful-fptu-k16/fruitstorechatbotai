@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from hashlib import sha256
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -71,12 +72,14 @@ class ResponseRewriter:
     def __init__(
         self,
         *,
+        generation_mode: str = "llm_only",
         llm_enabled: bool = True,
         gemini_api_key: str = "",
         gemini_model_name: str = "gemini-1.5-flash",
         gemini_timeout_seconds: float = 6.0,
         gemini_temperature: float = 0.2,
     ) -> None:
+        self.generation_mode = generation_mode.strip().lower()
         self.llm_enabled = llm_enabled
         self.gemini_api_key = gemini_api_key.strip()
         self.gemini_model_name = gemini_model_name
@@ -96,6 +99,37 @@ class ResponseRewriter:
         cleaned = _clean_text(base_answer)
         if not cleaned:
             return base_answer, "none"
+
+        if self.generation_mode == "deterministic":
+            deterministic_answer = self._rewrite_deterministic(
+                base_answer=cleaned,
+                user_message=user_message,
+                intent=intent,
+                session_id=session_id,
+                allow_follow_up=allow_follow_up,
+            )
+            return deterministic_answer, "deterministic"
+
+        if self.generation_mode == "llm_only":
+            if not self._can_use_gemini() or not language.lower().startswith("vi"):
+                raise RuntimeError(
+                    "Chế độ LLM-only đang bật nhưng Gemini chưa sẵn sàng. "
+                    "Hãy kiểm tra GEMINI_API_KEY và RESPONSE_GENERATION_MODE."
+                )
+
+            llm_answer = self._rewrite_with_llm(
+                base_answer=cleaned,
+                user_message=user_message,
+                intent=intent,
+                session_id=session_id,
+                allow_follow_up=allow_follow_up,
+            )
+            if not llm_answer:
+                raise RuntimeError(
+                    "Chế độ LLM-only đang bật nhưng Gemini không trả về nội dung hợp lệ. "
+                    "Không áp dụng fallback theo yêu cầu hiện tại."
+                )
+            return llm_answer, "gemini_strict"
 
         deterministic_answer = self._rewrite_deterministic(
             base_answer=cleaned,
@@ -117,6 +151,82 @@ class ResponseRewriter:
                 return llm_answer, "gemini"
 
         return deterministic_answer, "deterministic"
+
+    def review_answer_quality(
+        self,
+        *,
+        question: str,
+        answer: str,
+        intent: str,
+    ) -> dict[str, Any]:
+        if not self._can_use_gemini():
+            return {
+                "review_mode": "unavailable",
+                "score": None,
+                "is_reasonable": None,
+                "strengths": [],
+                "issues": ["Gemini chưa sẵn sàng để tự đánh giá."],
+                "lessons": [],
+            }
+
+        prompt = (
+            "Bạn là QA reviewer cho chatbot bán trái cây. "
+            "Đánh giá câu trả lời theo mức độ đúng ý người dùng, không lặp, và rõ ràng. "
+            "Trả về JSON thuần với schema: "
+            "{\"score\":0-100,\"is_reasonable\":true/false,\"strengths\":[...],\"issues\":[...],\"lessons\":[...],\"suggested_fix\":\"...\"}. "
+            "Không thêm văn bản ngoài JSON.\n\n"
+            f"Intent: {intent}\n"
+            f"Question: {question}\n"
+            f"Answer: {answer}\n"
+        )
+
+        raw = self._call_gemini(prompt=prompt, max_output_tokens=280)
+        if not raw:
+            return {
+                "review_mode": "error",
+                "score": None,
+                "is_reasonable": None,
+                "strengths": [],
+                "issues": ["Gemini không trả về review."],
+                "lessons": [],
+            }
+
+        parsed = self._parse_json_payload(raw)
+        if not parsed:
+            return {
+                "review_mode": "error",
+                "score": None,
+                "is_reasonable": None,
+                "strengths": [],
+                "issues": ["Gemini review không đúng định dạng JSON."],
+                "lessons": [],
+            }
+
+        score = parsed.get("score")
+        try:
+            score_value = int(score) if score is not None else None
+        except Exception:
+            score_value = None
+
+        is_reasonable = parsed.get("is_reasonable")
+        if not isinstance(is_reasonable, bool):
+            is_reasonable = None
+
+        def _as_list(value: Any) -> list[str]:
+            if not isinstance(value, list):
+                return []
+            return [str(item).strip() for item in value if str(item).strip()]
+
+        review = {
+            "review_mode": "gemini",
+            "score": score_value,
+            "is_reasonable": is_reasonable,
+            "strengths": _as_list(parsed.get("strengths")),
+            "issues": _as_list(parsed.get("issues")),
+            "lessons": _as_list(parsed.get("lessons")),
+            "suggested_fix": str(parsed.get("suggested_fix", "")).strip(),
+        }
+        return review
 
     def _can_use_gemini(self) -> bool:
         return self.llm_enabled and bool(self.gemini_api_key)
@@ -182,19 +292,29 @@ class ResponseRewriter:
             "nhưng phải giữ nguyên dữ kiện thực tế (tên sản phẩm, giá, số lượng, mức độ). "
             "Không bịa thông tin mới, không đổi nghĩa, không dùng markdown. "
             f"Giữ giọng điệu: {tone}. {follow_up_rule} "
-            "Độ dài 2-4 câu, dễ đọc.\n\n"
+            "Loại bỏ câu lặp hoặc ý lặp, tối đa 3 câu, rõ ràng.\n\n"
             f"Intent: {intent}\n"
             f"Câu hỏi người dùng: {user_message}\n"
             f"Bản nháp hiện tại: {base_answer}\n\n"
             "Trả về duy nhất câu trả lời đã viết lại."
         )
 
+        generated = self._call_gemini(prompt=prompt, max_output_tokens=280)
+        if not generated:
+            return None
+
+        return _clean_text(generated)
+
+    def _call_gemini(self, *, prompt: str, max_output_tokens: int) -> Optional[str]:
+        if not self._can_use_gemini():
+            return None
+
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": self.gemini_temperature,
                 "topP": 0.9,
-                "maxOutputTokens": 280,
+                "maxOutputTokens": max_output_tokens,
             },
         }
         url = (
@@ -214,7 +334,29 @@ class ResponseRewriter:
         if not generated:
             return None
 
-        return _clean_text(generated)
+        return generated
+
+    @staticmethod
+    def _parse_json_payload(text: str) -> Optional[dict[str, Any]]:
+        candidate = text.strip()
+        if candidate.startswith("```"):
+            candidate = candidate.strip("`")
+            candidate = candidate.replace("json", "", 1).strip()
+
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+
+        candidate = candidate[start : end + 1]
+        try:
+            payload = json.loads(candidate)
+        except Exception:
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+        return payload
 
     @staticmethod
     def _extract_gemini_text(payload: dict) -> Optional[str]:

@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from backend.api.mappers import to_product_out
 from backend.core.cache import semantic_cache
+from backend.core.config import get_settings
 from backend.core.text import normalize_text
 from backend.database.models import Product
 from backend.database.session import get_db
-from backend.observability.query_logger import log_user_question
+from backend.observability.query_logger import log_qa_pair, log_user_question
 from backend.schemas import RecommendRequest, RecommendResponse
 
 router = APIRouter(tags=["recommend"])
+settings = get_settings()
 
 
 @router.post("/recommend", response_model=RecommendResponse)
@@ -28,20 +30,44 @@ def recommend_products(
         metadata={"budget": payload.budget, "limit": payload.limit},
     )
 
-    cache_key = f"recommend:v4:{normalize_text(payload.query)}:{payload.budget}:{payload.limit}"
+    cache_key = f"recommend:v5:{normalize_text(payload.query)}:{payload.budget}:{payload.limit}"
     cached = semantic_cache.get(cache_key)
     if cached:
         products = [db.get(Product, product_id) for product_id in cached["product_ids"]]
         products = [product for product in products if product is not None and product.stock > 0]
         if products:
-            reasoning, _ = services.response_rewriter.rewrite(
-                base_answer=cached["reasoning"],
-                user_message=payload.query,
-                intent="recommendation",
+            try:
+                reasoning, rewrite_mode = services.response_rewriter.rewrite(
+                    base_answer=cached["reasoning"],
+                    user_message=payload.query,
+                    intent="recommendation",
+                    session_id=payload.session_id,
+                    language="vi",
+                    allow_follow_up=False,
+                )
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+            quality_review = {}
+            if settings.enable_answer_quality_review:
+                quality_review = services.response_rewriter.review_answer_quality(
+                    question=payload.query,
+                    answer=reasoning,
+                    intent="recommendation",
+                )
+
+            log_qa_pair(
+                source="/recommend",
+                question=payload.query,
+                answer=reasoning,
+                user_id=payload.user_id,
                 session_id=payload.session_id,
-                language="vi",
-                allow_follow_up=False,
+                intent="recommendation",
+                confidence=None,
+                metadata={"cache": True, "rewrite_mode": rewrite_mode},
+                review=quality_review,
             )
+
             return RecommendResponse(
                 reasoning=reasoning,
                 recommendations=[to_product_out(product) for product in products],
@@ -65,13 +91,36 @@ def recommend_products(
         ttl_seconds=120,
     )
 
-    reasoning, _ = services.response_rewriter.rewrite(
-        base_answer=reason,
-        user_message=payload.query,
-        intent="recommendation",
+    try:
+        reasoning, rewrite_mode = services.response_rewriter.rewrite(
+            base_answer=reason,
+            user_message=payload.query,
+            intent="recommendation",
+            session_id=payload.session_id,
+            language="vi",
+            allow_follow_up=False,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    quality_review = {}
+    if settings.enable_answer_quality_review:
+        quality_review = services.response_rewriter.review_answer_quality(
+            question=payload.query,
+            answer=reasoning,
+            intent="recommendation",
+        )
+
+    log_qa_pair(
+        source="/recommend",
+        question=payload.query,
+        answer=reasoning,
+        user_id=payload.user_id,
         session_id=payload.session_id,
-        language="vi",
-        allow_follow_up=False,
+        intent="recommendation",
+        confidence=None,
+        metadata={"cache": False, "rewrite_mode": rewrite_mode},
+        review=quality_review,
     )
 
     return RecommendResponse(

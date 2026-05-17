@@ -178,13 +178,17 @@ Primary environment variables (`.env.example`):
 | `USE_PRETRAINED_RERANKER` | `true` | cross-encoder reranker toggle |
 | `PRETRAINED_RERANKER_MODEL_NAME` | `BAAI/bge-reranker-v2-m3` | reranker model |
 | `RERANKER_CANDIDATE_POOL` | `30` | candidates before rerank |
-| `ENABLE_LLM_RESPONSE_REWRITE` | `true` | enable optional LLM rewrite branch for answers |
-| `GEMINI_API_KEY` | `` | Gemini API key (when empty, system uses deterministic rewrite only) |
-| `GEMINI_MODEL_NAME` | `gemini-1.5-flash` | Gemini model for rewrite branch |
-| `GEMINI_TIMEOUT_SECONDS` | `6.0` | timeout for Gemini rewrite call |
+| `RESPONSE_GENERATION_MODE` | `llm_only` | response mode: `llm_only`, `hybrid`, or `deterministic` |
+| `ENABLE_LLM_RESPONSE_REWRITE` | `true` | enable Gemini response generation/rewrite |
+| `GEMINI_API_KEY` | `` | Gemini API key (required for `llm_only`) |
+| `GEMINI_MODEL_NAME` | `gemini-1.5-flash` | Gemini model for response generation |
+| `GEMINI_TIMEOUT_SECONDS` | `6.0` | timeout for Gemini calls |
 | `GEMINI_TEMPERATURE` | `0.2` | low temperature for stable Gemini outputs |
 | `ENABLE_USER_QUERY_LOGGING` | `true` | write user queries to log |
 | `USER_QUERY_LOG_PATH` | `ai_log/user_questions.jsonl` | query log file path |
+| `ENABLE_QA_PAIR_LOGGING` | `true` | log each question-answer pair |
+| `QA_PAIR_LOG_PATH` | `ai_log/qa_pairs.jsonl` | question-answer log file path |
+| `ENABLE_ANSWER_QUALITY_REVIEW` | `true` | let Gemini self-review each answer quality |
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | frontend API base URL |
 
 ## 10. Model Strategy and Fallbacks
@@ -197,18 +201,24 @@ Default strategy:
 Fallback guarantees:
 - if embeddings fail to load -> hashing embeddings are used,
 - if reranker fails -> embedding order is used,
-- if semantic routing is unavailable -> keyword rules are used,
-- if strict filters produce no result -> available products fallback is returned.
+- if semantic routing is unavailable -> keyword rules are used.
 
 Response generation strategy:
-- Layer 1 (always on): deterministic multi-style response rewrite (no external API).
-- Layer 2 (optional): Gemini rewrite branch for more natural wording when `GEMINI_API_KEY` is provided.
-- Runtime fallback: if Gemini is unavailable, times out, or returns invalid content, response falls back to deterministic layer immediately.
+- `llm_only`: Gemini must generate the final answer; no deterministic fallback is used.
+- `hybrid`: deterministic draft + Gemini rewrite when available.
+- `deterministic`: no external LLM call.
+
+For strict LLM behavior (no fallback), keep `RESPONSE_GENERATION_MODE=llm_only` and provide `GEMINI_API_KEY`.
+
+Answer quality self-review:
+- Each Q/A pair can be logged to `ai_log/qa_pairs.jsonl`.
+- Gemini can score and comment on each answer (strengths/issues/lessons) for iterative improvement.
 
 Gemini quick setup:
 
 ```powershell
 $env:ENABLE_LLM_RESPONSE_REWRITE='true'
+$env:RESPONSE_GENERATION_MODE='llm_only'
 $env:GEMINI_API_KEY='your_real_key_here'
 $env:GEMINI_MODEL_NAME='gemini-1.5-flash'
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000

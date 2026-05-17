@@ -104,3 +104,8 @@
 - User request: "tôi đã thêm api key nhưng commit thì nên tránh commit apikey lên"
 - Assistant action: Removed real Gemini API key from tracked `.env.example`, hardened `.gitignore` to ignore all `.env.*` files except `.env.example`, and verified secret-safe git state guidance.
 - Scope: environment file hygiene, git ignore safeguards, and secure commit workflow.
+
+## 2026-05-17 (strict llm-only answers + qa review logging)
+- User request: "hãy xóa hết phần sử dụng rule based để trả lời câu hỏi và không cần fallback", đồng thời log từng câu hỏi/câu trả lời và tự rút kinh nghiệm chất lượng trả lời.
+- Assistant action: Added strict `llm_only` response mode (no deterministic fallback), raised explicit 503 when Gemini is unavailable in strict mode, logged each Q/A pair to JSONL, and added Gemini-based per-answer quality review fields (score/issues/lessons) for continuous tuning.
+- Scope: response generation mode, chat/recommend endpoint flow, observability logs, environment config, and regression tests.

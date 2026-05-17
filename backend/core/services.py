@@ -44,6 +44,7 @@ class ServiceFactory:
             memory_agent=memory_agent,
             retriever=retriever,
             response_rewriter=ResponseRewriter(
+                generation_mode=settings.response_generation_mode,
                 llm_enabled=settings.enable_llm_response_rewrite,
                 gemini_api_key=settings.gemini_api_key,
                 gemini_model_name=settings.gemini_model_name,

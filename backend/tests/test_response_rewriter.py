@@ -1,8 +1,10 @@
+import pytest
+
 from backend.core.response_rewriter import ResponseRewriter
 
 
 def test_rewriter_is_deterministic_without_llm() -> None:
-    rewriter = ResponseRewriter(llm_enabled=False)
+    rewriter = ResponseRewriter(generation_mode="deterministic", llm_enabled=False)
 
     kwargs = {
         "base_answer": "Hôm nay Xoài Cát Hòa Lộc đang khá ổn, giá 85.000đ, còn 40.",
@@ -24,6 +26,7 @@ def test_rewriter_is_deterministic_without_llm() -> None:
 
 def test_rewriter_fallbacks_to_deterministic_when_llm_returns_none(monkeypatch) -> None:
     rewriter = ResponseRewriter(
+        generation_mode="hybrid",
         llm_enabled=True,
         gemini_api_key="fake-key",
     )
@@ -45,6 +48,7 @@ def test_rewriter_fallbacks_to_deterministic_when_llm_returns_none(monkeypatch) 
 
 def test_rewriter_uses_gemini_when_available(monkeypatch) -> None:
     rewriter = ResponseRewriter(
+        generation_mode="hybrid",
         llm_enabled=True,
         gemini_api_key="fake-key",
     )
@@ -66,3 +70,40 @@ def test_rewriter_uses_gemini_when_available(monkeypatch) -> None:
 
     assert mode == "gemini"
     assert rewritten.startswith("Mình đã viết lại tự nhiên hơn")
+
+
+def test_rewriter_llm_only_raises_when_no_gemini_key() -> None:
+    rewriter = ResponseRewriter(
+        generation_mode="llm_only",
+        llm_enabled=True,
+        gemini_api_key="",
+    )
+
+    with pytest.raises(RuntimeError):
+        rewriter.rewrite(
+            base_answer="Mình có vài gợi ý phù hợp.",
+            user_message="Gợi ý cho tôi trái ngọt",
+            intent="recommendation",
+            session_id="session-style-4",
+            language="vi",
+            allow_follow_up=True,
+        )
+
+
+def test_rewriter_llm_only_raises_when_gemini_returns_none(monkeypatch) -> None:
+    rewriter = ResponseRewriter(
+        generation_mode="llm_only",
+        llm_enabled=True,
+        gemini_api_key="fake-key",
+    )
+    monkeypatch.setattr(rewriter, "_rewrite_with_llm", lambda **_: None)
+
+    with pytest.raises(RuntimeError):
+        rewriter.rewrite(
+            base_answer="Mình có vài gợi ý phù hợp.",
+            user_message="Gợi ý cho tôi trái ngọt",
+            intent="recommendation",
+            session_id="session-style-5",
+            language="vi",
+            allow_follow_up=True,
+        )

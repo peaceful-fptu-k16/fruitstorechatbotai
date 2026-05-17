@@ -117,7 +117,6 @@ def test_recommendation_falls_back_when_dl_has_no_semantic_score(db_session: Ses
     )
 
     assert products
-    assert "chấm điểm ổn định" in reason.lower()
     assert "khớp khẩu vị" in reason.lower()
 
 
@@ -222,3 +221,29 @@ def test_recommendation_respects_do_not_too_sour_request(db_session: Session) ->
     assert products
     assert "vị ít chua" in reason.lower()
     assert all(product.sourness_level <= 3 for product in products)
+
+
+def test_parse_preferences_does_not_carry_budget_without_explicit_signal() -> None:
+    profile = PreferenceProfile(budget_hint=100_000)
+    agent = RecommendationAgent()
+
+    constraints = agent.parse_preferences("Hôm nay có trái nào ngọt nhất không?", profile)
+
+    assert constraints["budget"] is None
+
+
+def test_recommendation_returns_empty_when_constraints_too_strict(db_session: Session) -> None:
+    agent = RecommendationAgent()
+
+    products, reason = agent.recommend(
+        db_session,
+        query="trái ngọt nhất dưới 5k",
+        profile=PreferenceProfile(),
+        explicit_budget=None,
+        limit=4,
+        retriever=None,
+        use_deep_learning=False,
+    )
+
+    assert products == []
+    assert "không tìm thấy" in reason.lower()

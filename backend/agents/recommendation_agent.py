@@ -164,7 +164,22 @@ class RecommendationAgent:
         }
 
         budget = self._extract_budget(normalized)
-        constraints["budget"] = budget or profile.budget_hint
+        wants_budget_carryover = self._contains_any(
+            normalized,
+            (
+                "giu nguyen ngan sach",
+                "giu ngan sach",
+                "nhu cu",
+                "nhu truoc",
+                "van tam gia do",
+            ),
+        )
+        if budget is not None:
+            constraints["budget"] = budget
+        elif wants_budget_carryover:
+            constraints["budget"] = profile.budget_hint
+        else:
+            constraints["budget"] = None
         return constraints
 
     def _parse_preferences(self, query: str, profile: PreferenceProfile) -> dict:
@@ -448,17 +463,13 @@ class RecommendationAgent:
                     reason = self._build_reason(constraints=constraints, used_deep_learning=True)
                     return products, reason
 
-                deep_learning_fallback_note = (
-                    "Ở lượt này mình ưu tiên cách chấm điểm ổn định theo khẩu vị và dinh dưỡng."
-                )
+                deep_learning_fallback_note = ""
             else:
-                deep_learning_fallback_note = "Hiện mình ưu tiên bộ tiêu chí khẩu vị và dinh dưỡng để giữ kết quả ổn định."
+                deep_learning_fallback_note = ""
 
         if not products:
-            # Graceful fallback to available products when constraints are too narrow.
-            fallback = select(Product).where(Product.stock > 0).order_by(asc(Product.price)).limit(limit)
-            products = list(db.scalars(fallback))
-            reason = "Tiêu chí hiện tại hơi chặt, mình tạm đề xuất các sản phẩm còn hàng và dễ mua nhất trước nhé."
+            reason = "Không tìm thấy sản phẩm khớp hoàn toàn với tiêu chí hiện tại của bạn."
+            return [], reason
         else:
             products = products[:limit]
             reason = self._build_reason(
@@ -466,8 +477,5 @@ class RecommendationAgent:
                 used_deep_learning=False,
                 fallback_note=deep_learning_fallback_note or None,
             )
-
-        if deep_learning_fallback_note and not products:
-            reason = f"{reason} {deep_learning_fallback_note}"
 
         return products, reason

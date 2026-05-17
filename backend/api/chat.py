@@ -2,19 +2,21 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from backend.api.mappers import to_product_out
 from backend.core.cache import semantic_cache
+from backend.core.config import get_settings
 from backend.core.text import normalize_text
 from backend.database.models import Product
 from backend.database.queries import save_message
 from backend.database.session import get_db
-from backend.observability.query_logger import log_user_question
+from backend.observability.query_logger import log_qa_pair, log_user_question
 from backend.schemas import ChatRequest, ChatResponse, CitationOut
 
 router = APIRouter(tags=["chat"])
+settings = get_settings()
 
 
 def _citations_from_results(results: list[dict], source_type: str) -> list[CitationOut]:
@@ -285,7 +287,7 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
             answer = "Mình chưa tìm thấy sản phẩm bạn hỏi hoặc sản phẩm đang tạm hết hàng."
 
     elif route.intent == "recommendation":
-        cache_key = f"chat:rec:v4:{normalize_text(payload.message)}"
+        cache_key = f"chat:rec:v5:{normalize_text(payload.message)}"
         cached = semantic_cache.get(cache_key)
 
         if cached:
@@ -361,13 +363,36 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
             "Bạn có thể hỏi về sản phẩm, tồn kho, gợi ý theo vị, giao hàng hoặc đổi trả."
         )
 
-    answer, rewrite_mode = services.response_rewriter.rewrite(
-        base_answer=answer,
-        user_message=payload.message,
-        intent=route.intent,
+    try:
+        answer, rewrite_mode = services.response_rewriter.rewrite(
+            base_answer=answer,
+            user_message=payload.message,
+            intent=route.intent,
+            session_id=payload.session_id,
+            language=payload.language,
+            allow_follow_up=True,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    quality_review = {}
+    if settings.enable_answer_quality_review:
+        quality_review = services.response_rewriter.review_answer_quality(
+            question=payload.message,
+            answer=answer,
+            intent=route.intent,
+        )
+
+    log_qa_pair(
+        source="/chat",
+        question=payload.message,
+        answer=answer,
+        user_id=payload.user_id,
         session_id=payload.session_id,
-        language=payload.language,
-        allow_follow_up=True,
+        intent=route.intent,
+        confidence=route.confidence,
+        metadata={"trace_id": trace_id, "rewrite_mode": rewrite_mode},
+        review=quality_review,
     )
 
     save_message(
@@ -389,6 +414,7 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
             "intent": route.intent,
             "fallback": fallback,
             "rewrite_mode": rewrite_mode,
+            "quality_score": quality_review.get("score") if isinstance(quality_review, dict) else None,
         },
     )
 
