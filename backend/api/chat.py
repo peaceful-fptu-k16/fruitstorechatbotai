@@ -56,8 +56,12 @@ def _build_recommendation_answer(
     criteria: list[str] = []
     if constraints.get("min_sweetness") is not None:
         criteria.append("độ ngọt cao")
+    if constraints.get("max_sweetness") is not None:
+        criteria.append("độ ngọt vừa phải")
     if constraints.get("max_sourness") is not None:
         criteria.append("vị ít chua")
+    if constraints.get("min_sourness") is not None:
+        criteria.append("vị chua rõ")
     if constraints.get("max_seed") is not None:
         criteria.append("ít hạt")
     if constraints.get("min_juiciness") is not None:
@@ -167,7 +171,7 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
             answer = "Mình chưa tìm thấy sản phẩm bạn hỏi hoặc sản phẩm đang tạm hết hàng."
 
     elif route.intent == "recommendation":
-        cache_key = f"chat:rec:v3:{normalize_text(payload.message)}"
+        cache_key = f"chat:rec:v4:{normalize_text(payload.message)}"
         cached = semantic_cache.get(cache_key)
 
         if cached:

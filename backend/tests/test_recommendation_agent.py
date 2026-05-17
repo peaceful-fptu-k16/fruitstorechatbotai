@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from typing import Generator
 
 from backend.agents.memory_agent import PreferenceProfile
 from backend.agents.recommendation_agent import RecommendationAgent
@@ -38,7 +39,7 @@ class DummyRetriever:
 
 
 @pytest.fixture
-def db_session() -> Session:
+def db_session() -> Generator[Session, None, None]:
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -118,3 +119,106 @@ def test_recommendation_falls_back_when_dl_has_no_semantic_score(db_session: Ses
     assert products
     assert "chấm điểm ổn định" in reason.lower()
     assert "khớp khẩu vị" in reason.lower()
+
+
+def test_parse_preferences_current_sour_query_overrides_saved_sweet_profile() -> None:
+    profile = PreferenceProfile(prefers_sweet=True)
+    agent = RecommendationAgent()
+
+    constraints = agent.parse_preferences("Trái chua", profile)
+
+    assert constraints["min_sweetness"] is None
+    assert constraints["min_sourness"] is not None
+    assert constraints["max_sourness"] is None
+
+
+def test_recommendation_distinguishes_sweetest_and_sourest_queries(db_session: Session) -> None:
+    agent = RecommendationAgent()
+
+    sweet_products, sweet_reason = agent.recommend(
+        db_session,
+        query="Hôm nay có trái nào ngọt nhất không?",
+        profile=PreferenceProfile(),
+        explicit_budget=None,
+        limit=3,
+        retriever=None,
+        use_deep_learning=False,
+    )
+    sour_products, sour_reason = agent.recommend(
+        db_session,
+        query="Hôm nay có trái nào chua nhất không?",
+        profile=PreferenceProfile(prefers_sweet=True),
+        explicit_budget=None,
+        limit=3,
+        retriever=None,
+        use_deep_learning=False,
+    )
+
+    assert sweet_products
+    assert sour_products
+    assert "độ ngọt cao" in sweet_reason.lower()
+    assert "vị chua rõ" in sour_reason.lower()
+    assert sour_products[0].sourness_level >= sweet_products[0].sourness_level
+
+
+@pytest.mark.parametrize(
+    ("query", "expect_min_sweet", "expect_max_sweet", "expect_min_sour", "expect_max_sour"),
+    [
+        ("không quá ngọt", None, 6, None, None),
+        ("đừng ngọt quá", None, 6, None, None),
+        ("chua nhẹ thôi", None, None, None, 3),
+        ("đừng chua quá", None, None, None, 3),
+        ("trái chua", None, None, 4, None),
+        ("ngọt nhất", 8, None, None, None),
+    ],
+)
+def test_parse_preferences_negation_and_extreme_phrases(
+    query: str,
+    expect_min_sweet: int | None,
+    expect_max_sweet: int | None,
+    expect_min_sour: int | None,
+    expect_max_sour: int | None,
+) -> None:
+    agent = RecommendationAgent()
+    constraints = agent.parse_preferences(query, PreferenceProfile(prefers_sweet=True))
+
+    assert constraints["min_sweetness"] == expect_min_sweet
+    assert constraints["max_sweetness"] == expect_max_sweet
+    assert constraints["min_sourness"] == expect_min_sour
+    assert constraints["max_sourness"] == expect_max_sour
+
+
+def test_recommendation_respects_not_too_sweet_request(db_session: Session) -> None:
+    agent = RecommendationAgent()
+
+    products, reason = agent.recommend(
+        db_session,
+        query="không quá ngọt",
+        profile=PreferenceProfile(prefers_sweet=True),
+        explicit_budget=None,
+        limit=4,
+        retriever=None,
+        use_deep_learning=False,
+    )
+
+    assert products
+    assert "độ ngọt vừa phải" in reason.lower()
+    assert all(product.sweetness_level <= 6 for product in products)
+
+
+def test_recommendation_respects_do_not_too_sour_request(db_session: Session) -> None:
+    agent = RecommendationAgent()
+
+    products, reason = agent.recommend(
+        db_session,
+        query="đừng chua quá",
+        profile=PreferenceProfile(prefers_sweet=True),
+        explicit_budget=None,
+        limit=4,
+        retriever=None,
+        use_deep_learning=False,
+    )
+
+    assert products
+    assert "vị ít chua" in reason.lower()
+    assert all(product.sourness_level <= 3 for product in products)

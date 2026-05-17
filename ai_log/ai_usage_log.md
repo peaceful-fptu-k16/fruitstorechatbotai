@@ -74,3 +74,18 @@
 - User request: "hãy chỉnh sửa lại readme cho chi tiết và chuyên nghiệp hơn rồi commit lên git"
 - Assistant action: Rewrote README with professional structure including architecture, setup, configuration matrix, API reference, model strategy/fallbacks, observability, testing, troubleshooting, and security guidance; then prepared commit and push.
 - Scope: documentation quality uplift and release-ready onboarding instructions.
+
+## 2026-05-17 (run instructions request)
+- User request: "cách chạy dự án"
+- Assistant action: Provided concise Windows-first run instructions for backend/frontend, plus optional Docker and quick health checks.
+- Scope: local startup guidance and operational verification steps.
+
+## 2026-05-17 (fix recommendation intent confusion)
+- User request: Chatbot did not distinguish between "ngọt" and "chua/chua nhất" across consecutive queries and asked for more accurate responses.
+- Assistant action: Updated recommendation parsing to prioritize current-turn intent over sticky memory, added explicit sour/sour-most constraints, improved ranking tie-break and SQL ordering, bumped recommendation cache keys, and added regression tests for sweet-vs-sour overrides.
+- Scope: recommendation agent logic, chat/recommend cache key versioning, and backend regression tests.
+
+## 2026-05-17 (negation phrase understanding + broader tests)
+- User request: "Mình tinh chỉnh thêm để bot hiểu tốt hơn các cụm phủ định kiểu 'không quá ngọt', 'chua nhẹ thôi', 'đừng chua quá'. hãy tinh chỉnh thêm nhiều test case khác"
+- Assistant action: Added negation-aware parsing for sweet/sour constraints, ensured current-turn sour/low-sour intent overrides remembered sweet preference, added `max_sweetness` handling, updated response criteria text, and expanded recommendation tests with multiple negation/extreme phrase scenarios.
+- Scope: recommendation/memory parsing, chat criteria rendering, and extended backend test coverage.

@@ -33,6 +33,91 @@ class RecommendationAgent:
     def parse_preferences(self, query: str, profile: PreferenceProfile) -> dict:
         normalized = normalize_text(query)
 
+        explicit_low_sweet = self._contains_any(
+            normalized,
+            (
+                "khong qua ngot",
+                "dung ngot qua",
+                "it ngot",
+                "ngot nhe",
+                "ngot vua",
+            ),
+        )
+
+        explicit_sweet = self._contains_any(
+            normalized,
+            (
+                "ngot",
+                "ngot nhat",
+                "rat ngot",
+                "cuc ngot",
+                "ngot hon",
+            ),
+        ) and not explicit_low_sweet
+        explicit_low_sour = self._contains_any(
+            normalized,
+            (
+                "it chua",
+                "khong chua",
+                "chua nhe",
+                "chua nhe thoi",
+                "chua vua",
+                "khong qua chua",
+                "dung chua qua",
+            ),
+        )
+        explicit_sour = (
+            self._contains_any(
+                normalized,
+                (
+                    "chua",
+                    "sour",
+                    "chua nhat",
+                    "rat chua",
+                    "cuc chua",
+                    "chua hon",
+                ),
+            )
+            and not explicit_low_sour
+        )
+        wants_sweetest = self._contains_any(normalized, ("ngot nhat", "rat ngot", "cuc ngot"))
+        wants_sourest = self._contains_any(normalized, ("chua nhat", "rat chua", "cuc chua", "chua hon"))
+
+        if explicit_low_sweet:
+            min_sweetness = None
+            max_sweetness = 6
+        elif (explicit_sour or explicit_low_sour) and not explicit_sweet:
+            min_sweetness = None
+            max_sweetness = None
+        elif wants_sweetest:
+            min_sweetness = 8
+            max_sweetness = None
+        elif explicit_sweet:
+            min_sweetness = 7
+            max_sweetness = None
+        elif profile.prefers_sweet and not explicit_sour and not explicit_low_sour:
+            min_sweetness = 7
+            max_sweetness = None
+        else:
+            min_sweetness = None
+            max_sweetness = None
+
+        if explicit_low_sour:
+            max_sourness = 3
+            min_sourness = None
+        elif wants_sourest:
+            max_sourness = None
+            min_sourness = 5
+        elif explicit_sour:
+            max_sourness = None
+            min_sourness = 4
+        elif profile.prefers_low_sour:
+            max_sourness = 3
+            min_sourness = None
+        else:
+            max_sourness = None
+            min_sourness = None
+
         prefers_low_sugar = self._contains_any(normalized, ("it duong", "an kieng", "giam can", "keto")) or bool(
             profile.prefers_low_sugar
         )
@@ -58,8 +143,10 @@ class RecommendationAgent:
             preferred_use = "Ăn tươi"
 
         constraints: dict = {
-            "min_sweetness": 7 if ("ngot" in normalized or profile.prefers_sweet) else None,
-            "max_sourness": 3 if ("it chua" in normalized or profile.prefers_low_sour) else None,
+            "min_sweetness": min_sweetness,
+            "max_sweetness": max_sweetness,
+            "min_sourness": min_sourness,
+            "max_sourness": max_sourness,
             "max_seed": 3 if ("it hat" in normalized or profile.prefers_low_seed) else None,
             "min_juiciness": 7
             if (self._contains_any(normalized, ("mong nuoc", "nhieu nuoc", "giai nhiet", "ep nuoc")) or profile.prefers_juicy)
@@ -99,8 +186,14 @@ class RecommendationAgent:
         if constraints["min_sweetness"] is not None:
             score_parts.append(float(product.sweetness_level) / 10.0)
 
+        if constraints["max_sweetness"] is not None:
+            score_parts.append((10.0 - float(product.sweetness_level)) / 10.0)
+
         if constraints["max_sourness"] is not None:
             score_parts.append((10.0 - float(product.sourness_level)) / 10.0)
+
+        if constraints["min_sourness"] is not None:
+            score_parts.append(float(product.sourness_level) / 10.0)
 
         if constraints["max_seed"] is not None:
             score_parts.append((10.0 - float(product.seed_level)) / 10.0)
@@ -155,6 +248,16 @@ class RecommendationAgent:
 
         return sum(score_parts) / float(len(score_parts))
 
+    @staticmethod
+    def _tie_breaker_score(product: Product, *, constraints: dict) -> float:
+        if constraints.get("min_sourness") is not None:
+            return float(product.sourness_level) - float(product.sweetness_level) * 0.15
+
+        if constraints.get("min_sweetness") is not None:
+            return float(product.sweetness_level) - float(product.sourness_level) * 0.15
+
+        return float(product.sweetness_level - product.sourness_level)
+
     def _rank_with_deep_learning(
         self,
         retriever: Any,
@@ -200,7 +303,7 @@ class RecommendationAgent:
                 score_by_id.get(product.id, 0.0) * 0.78
                 + self._preference_score(product, constraints=constraints, budget=budget) * 0.22,
                 score_by_id.get(product.id, 0.0),
-                product.sweetness_level - product.sourness_level,
+                self._tie_breaker_score(product, constraints=constraints),
                 -product.price,
             ),
             reverse=True,
@@ -211,8 +314,12 @@ class RecommendationAgent:
         traits: list[str] = []
         if constraints.get("min_sweetness") is not None:
             traits.append("độ ngọt cao")
+        if constraints.get("max_sweetness") is not None:
+            traits.append("độ ngọt vừa phải")
         if constraints.get("max_sourness") is not None:
             traits.append("vị ít chua")
+        if constraints.get("min_sourness") is not None:
+            traits.append("vị chua rõ")
         if constraints.get("max_seed") is not None:
             traits.append("ít hạt")
         if constraints.get("min_juiciness") is not None:
@@ -264,8 +371,12 @@ class RecommendationAgent:
 
         if constraints["min_sweetness"] is not None:
             statement = statement.where(Product.sweetness_level >= constraints["min_sweetness"])
+        if constraints["max_sweetness"] is not None:
+            statement = statement.where(Product.sweetness_level <= constraints["max_sweetness"])
         if constraints["max_sourness"] is not None:
             statement = statement.where(Product.sourness_level <= constraints["max_sourness"])
+        if constraints["min_sourness"] is not None:
+            statement = statement.where(Product.sourness_level >= constraints["min_sourness"])
         if constraints["max_seed"] is not None:
             statement = statement.where(Product.seed_level <= constraints["max_seed"])
         if constraints["min_juiciness"] is not None:
@@ -287,11 +398,38 @@ class RecommendationAgent:
         if budget is not None:
             statement = statement.where(Product.price <= budget)
 
-        statement = statement.order_by(
-            asc(Product.sourness_level),
-            asc(Product.seed_level),
-            asc(Product.price),
-        ).limit(candidate_limit)
+        if constraints["min_sourness"] is not None:
+            statement = statement.order_by(
+                Product.sourness_level.desc(),
+                Product.sweetness_level.desc(),
+                asc(Product.price),
+            )
+        elif constraints["max_sweetness"] is not None:
+            statement = statement.order_by(
+                Product.sweetness_level.desc(),
+                asc(Product.sourness_level),
+                asc(Product.price),
+            )
+        elif constraints["max_sourness"] is not None:
+            statement = statement.order_by(
+                asc(Product.sourness_level),
+                Product.sweetness_level.desc(),
+                asc(Product.price),
+            )
+        elif constraints["min_sweetness"] is not None:
+            statement = statement.order_by(
+                Product.sweetness_level.desc(),
+                asc(Product.sourness_level),
+                asc(Product.price),
+            )
+        else:
+            statement = statement.order_by(
+                Product.sweetness_level.desc(),
+                asc(Product.sourness_level),
+                asc(Product.price),
+            )
+
+        statement = statement.limit(candidate_limit)
 
         products = list(db.scalars(statement))
         deep_learning_fallback_note = ""

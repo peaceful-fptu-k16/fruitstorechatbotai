@@ -28,7 +28,7 @@ def recommend_products(
         metadata={"budget": payload.budget, "limit": payload.limit},
     )
 
-    cache_key = f"recommend:v3:{normalize_text(payload.query)}:{payload.budget}:{payload.limit}"
+    cache_key = f"recommend:v4:{normalize_text(payload.query)}:{payload.budget}:{payload.limit}"
     cached = semantic_cache.get(cache_key)
     if cached:
         products = [db.get(Product, product_id) for product_id in cached["product_ids"]]

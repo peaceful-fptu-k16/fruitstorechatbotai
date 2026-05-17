@@ -53,11 +53,28 @@ class MemoryAgent:
         profile = self._profiles[session_id]
         normalized = normalize_text(message)
 
-        if "ngot" in normalized:
+        explicit_low_sweet = self._contains_any(
+            normalized,
+            (
+                "khong qua ngot",
+                "dung ngot qua",
+                "it ngot",
+                "ngot nhe",
+                "ngot vua",
+            ),
+        )
+
+        if "ngot" in normalized and not explicit_low_sweet:
             profile.prefers_sweet = True
             profile.signals.append("sweet")
 
-        if "it chua" in normalized or "khong chua" in normalized:
+        if (
+            "it chua" in normalized
+            or "khong chua" in normalized
+            or "dung chua qua" in normalized
+            or "chua nhe" in normalized
+            or "khong qua chua" in normalized
+        ):
             profile.prefers_low_sour = True
             profile.signals.append("low_sour")
 
