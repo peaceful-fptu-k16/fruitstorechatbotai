@@ -13,8 +13,8 @@ out/
 
 # Env files
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Runtime logs
 ai_log/user_questions.jsonl

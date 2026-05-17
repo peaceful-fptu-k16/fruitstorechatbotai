@@ -178,6 +178,11 @@ Primary environment variables (`.env.example`):
 | `USE_PRETRAINED_RERANKER` | `true` | cross-encoder reranker toggle |
 | `PRETRAINED_RERANKER_MODEL_NAME` | `BAAI/bge-reranker-v2-m3` | reranker model |
 | `RERANKER_CANDIDATE_POOL` | `30` | candidates before rerank |
+| `ENABLE_LLM_RESPONSE_REWRITE` | `true` | enable optional LLM rewrite branch for answers |
+| `GEMINI_API_KEY` | `` | Gemini API key (when empty, system uses deterministic rewrite only) |
+| `GEMINI_MODEL_NAME` | `gemini-1.5-flash` | Gemini model for rewrite branch |
+| `GEMINI_TIMEOUT_SECONDS` | `6.0` | timeout for Gemini rewrite call |
+| `GEMINI_TEMPERATURE` | `0.2` | low temperature for stable Gemini outputs |
 | `ENABLE_USER_QUERY_LOGGING` | `true` | write user queries to log |
 | `USER_QUERY_LOG_PATH` | `ai_log/user_questions.jsonl` | query log file path |
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | frontend API base URL |
@@ -194,6 +199,20 @@ Fallback guarantees:
 - if reranker fails -> embedding order is used,
 - if semantic routing is unavailable -> keyword rules are used,
 - if strict filters produce no result -> available products fallback is returned.
+
+Response generation strategy:
+- Layer 1 (always on): deterministic multi-style response rewrite (no external API).
+- Layer 2 (optional): Gemini rewrite branch for more natural wording when `GEMINI_API_KEY` is provided.
+- Runtime fallback: if Gemini is unavailable, times out, or returns invalid content, response falls back to deterministic layer immediately.
+
+Gemini quick setup:
+
+```powershell
+$env:ENABLE_LLM_RESPONSE_REWRITE='true'
+$env:GEMINI_API_KEY='your_real_key_here'
+$env:GEMINI_MODEL_NAME='gemini-1.5-flash'
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
 
 ## 11. API Reference (Core)
 

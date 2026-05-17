@@ -132,6 +132,108 @@ def _build_recommendation_answer(
     return f"{intro} {reason} Gợi ý nổi bật: {'; '.join(highlights)}.{more} {closings[style_idx]}"
 
 
+def _product_taste_brief(product: Product) -> str:
+    notes: list[str] = []
+
+    if product.sweetness_level >= 8:
+        notes.append("ngọt đậm")
+    elif product.sweetness_level >= 6:
+        notes.append("ngọt vừa")
+    else:
+        notes.append("ngọt nhẹ")
+
+    if product.sourness_level <= 2:
+        notes.append("ít chua")
+    elif product.sourness_level >= 5:
+        notes.append("chua rõ")
+    else:
+        notes.append("chua nhẹ")
+
+    if product.juiciness_level >= 8:
+        notes.append("mọng nước")
+    if product.aroma_level >= 7:
+        notes.append("thơm")
+
+    return ", ".join(notes[:4])
+
+
+def _showcase_score(product: Product, user_message: str) -> float:
+    normalized = normalize_text(user_message)
+
+    score = (
+        product.sweetness_level * 0.34
+        + product.aroma_level * 0.24
+        + product.juiciness_level * 0.20
+        + (10 - product.sourness_level) * 0.16
+        + (10 - product.seed_level) * 0.06
+    )
+
+    if "ngot" in normalized:
+        score += product.sweetness_level * 0.45
+    if any(keyword in normalized for keyword in ("it chua", "chua nhe", "dung chua qua")):
+        score += (10 - product.sourness_level) * 0.45
+    if any(keyword in normalized for keyword in ("ngan sach", "gia", "duoi", "re")):
+        score += max(0, 120000 - product.price) / 20000
+
+    return score
+
+
+def _build_available_products_answer(
+    *,
+    user_message: str,
+    products: list[Product],
+    focus_products: list[Product],
+) -> str:
+    if not products:
+        return "Hiện tại kho tạm hết sản phẩm. Bạn quay lại sau ít phút nhé."
+
+    normalized = normalize_text(user_message)
+    style_idx = (sum(ord(ch) for ch in normalized) + len(products)) % 3
+
+    if focus_products:
+        top = focus_products[0]
+        alternatives = [product for product in sorted(products, key=lambda item: _showcase_score(item, user_message), reverse=True) if product.id != top.id][:2]
+        followups = (
+            "Bạn muốn mình chọn thêm bản ngọt hơn hay bản ít chua hơn từ nhóm này không?",
+            "Nếu bạn thích, mình lọc tiếp theo ngân sách để chốt nhanh hơn.",
+            "Mình có thể chốt luôn 1-2 lựa chọn cùng gu để bạn dễ chọn.",
+        )
+
+        answer = (
+            f"Có nhé. Hôm nay {top.name} đang khá ổn: {_product_taste_brief(top)}, "
+            f"giá {_format_vnd(top.price)}, còn {top.stock}."
+        )
+
+        if alternatives:
+            alt_names = _join_human_list([product.name for product in alternatives])
+            answer += f" Nếu muốn đổi vị, bạn có thể tham khảo thêm {alt_names}."
+
+        return f"{answer} {followups[style_idx]}"
+
+    ranked = sorted(products, key=lambda product: _showcase_score(product, user_message), reverse=True)
+    highlights = ranked[:4]
+    names = _join_human_list([product.name for product in highlights])
+    intros = (
+        "Mình vừa rà nhanh các mặt hàng đang có và chọn ra nhóm dễ ăn nhất.",
+        "Shop đang có vài lựa chọn ngon khá rõ theo tiêu chí bạn hỏi.",
+        "Mình lọc nhanh danh sách hôm nay và thấy các lựa chọn sau khá ổn.",
+    )
+
+    reasoning = ""
+    if "ngon" in normalized:
+        reasoning = " Mình ưu tiên nhóm có điểm ngọt-thơm-mọng nước cao hơn."
+    elif any(keyword in normalized for keyword in ("gia", "ngan sach", "duoi", "re")):
+        reasoning = " Mình ưu tiên các lựa chọn dễ vào ngân sách."
+
+    top = highlights[0]
+    detail = f"Gợi ý nổi bật nhất lúc này là {top.name} ({_product_taste_brief(top)}, giá {_format_vnd(top.price)})."
+
+    return (
+        f"{intros[style_idx]}{reasoning} Hiện đáng thử: {names}. "
+        f"{detail} Bạn muốn mình lọc tiếp theo vị ngọt, độ chua hay mức giá?"
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) -> ChatResponse:
     services = request.app.state.services
@@ -153,12 +255,24 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
     fallback = False
 
     if route.intent == "available_products":
-        products = services.inventory_agent.list_available(db, limit=8)
-        if products:
-            names = ", ".join(product.name for product in products[:4])
-            answer = f"Hôm nay shop đang có: {names}. Bạn muốn lọc theo vị ngọt, ít chua hay ngân sách không?"
-        else:
-            answer = "Hiện tại kho tạm hết sản phẩm. Bạn quay lại sau ít phút nhé."
+        products = services.inventory_agent.list_available(db, limit=24)
+        focus_products = services.inventory_agent.infer_focus_products(db, payload.message, limit=3)
+
+        if not focus_products:
+            candidate_name = services.inventory_agent.extract_candidate_name(payload.message)
+            if candidate_name:
+                focus_products = services.inventory_agent.list_available(db, query=candidate_name, limit=3)
+
+        answer = _build_available_products_answer(
+            user_message=payload.message,
+            products=products,
+            focus_products=focus_products,
+        )
+
+        if focus_products:
+            focus_ids = {product.id for product in focus_products}
+            products = focus_products + [product for product in products if product.id not in focus_ids]
+            products = products[:8]
 
     elif route.intent == "inventory_check":
         candidate_name = services.inventory_agent.extract_candidate_name(payload.message)
@@ -247,6 +361,15 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
             "Bạn có thể hỏi về sản phẩm, tồn kho, gợi ý theo vị, giao hàng hoặc đổi trả."
         )
 
+    answer, rewrite_mode = services.response_rewriter.rewrite(
+        base_answer=answer,
+        user_message=payload.message,
+        intent=route.intent,
+        session_id=payload.session_id,
+        language=payload.language,
+        allow_follow_up=True,
+    )
+
     save_message(
         db,
         session_id=payload.session_id,
@@ -261,7 +384,12 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
         user_id=payload.user_id,
         role="assistant",
         content=answer,
-        metadata_json={"trace_id": trace_id, "intent": route.intent, "fallback": fallback},
+        metadata_json={
+            "trace_id": trace_id,
+            "intent": route.intent,
+            "fallback": fallback,
+            "rewrite_mode": rewrite_mode,
+        },
     )
 
     return ChatResponse(

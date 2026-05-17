@@ -89,3 +89,18 @@
 - User request: "Mình tinh chỉnh thêm để bot hiểu tốt hơn các cụm phủ định kiểu 'không quá ngọt', 'chua nhẹ thôi', 'đừng chua quá'. hãy tinh chỉnh thêm nhiều test case khác"
 - Assistant action: Added negation-aware parsing for sweet/sour constraints, ensured current-turn sour/low-sour intent overrides remembered sweet preference, added `max_sweetness` handling, updated response criteria text, and expanded recommendation tests with multiple negation/extreme phrase scenarios.
 - Scope: recommendation/memory parsing, chat criteria rendering, and extended backend test coverage.
+
+## 2026-05-17 (available response feels hardcoded)
+- User request: "Xoài hôm nay có gì ngon không? ... thật sự nó đang trả lời như kiểu được fix cứng không giống model trả lời"
+- Assistant action: Reworked available-products chat response from a static template to context-aware natural language, added product-focus detection from user message (including fruit aliases), and prioritized mentioned fruit in answer highlights with richer taste/price/stock details.
+- Scope: inventory entity inference, chat answer generation for available-products intent, and regression test for mango-focused query.
+
+## 2026-05-17 (deterministic style layer + Gemini branch)
+- User request: "Thêm lớp viết lại câu trả lời theo nhiều phong cách hội thoại (deterministic)... bật nhánh sinh ngôn ngữ bằng LLM khi có API, dùng Gemini api key"
+- Assistant action: Added a deterministic multi-style response rewriter service, integrated optional Gemini rewrite branch with automatic fallback to deterministic output on error/timeout/no key, wired it into `/chat` and `/recommend`, added environment configs/docs, and created regression tests for deterministic/fallback/LLM-path behavior.
+- Scope: response generation layer, service wiring, API endpoints, environment/readme updates, and test coverage.
+
+## 2026-05-17 (prevent API key from commit)
+- User request: "tôi đã thêm api key nhưng commit thì nên tránh commit apikey lên"
+- Assistant action: Removed real Gemini API key from tracked `.env.example`, hardened `.gitignore` to ignore all `.env.*` files except `.env.example`, and verified secret-safe git state guidance.
+- Scope: environment file hygiene, git ignore safeguards, and secure commit workflow.

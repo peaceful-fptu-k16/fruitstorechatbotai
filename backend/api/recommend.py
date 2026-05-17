@@ -34,8 +34,16 @@ def recommend_products(
         products = [db.get(Product, product_id) for product_id in cached["product_ids"]]
         products = [product for product in products if product is not None and product.stock > 0]
         if products:
+            reasoning, _ = services.response_rewriter.rewrite(
+                base_answer=cached["reasoning"],
+                user_message=payload.query,
+                intent="recommendation",
+                session_id=payload.session_id,
+                language="vi",
+                allow_follow_up=False,
+            )
             return RecommendResponse(
-                reasoning=cached["reasoning"],
+                reasoning=reasoning,
                 recommendations=[to_product_out(product) for product in products],
             )
 
@@ -57,7 +65,16 @@ def recommend_products(
         ttl_seconds=120,
     )
 
+    reasoning, _ = services.response_rewriter.rewrite(
+        base_answer=reason,
+        user_message=payload.query,
+        intent="recommendation",
+        session_id=payload.session_id,
+        language="vi",
+        allow_follow_up=False,
+    )
+
     return RecommendResponse(
-        reasoning=reason,
+        reasoning=reasoning,
         recommendations=[to_product_out(product) for product in products],
     )

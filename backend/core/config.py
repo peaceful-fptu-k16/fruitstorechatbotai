@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     use_pretrained_reranker: bool = True
     pretrained_reranker_model_name: str = "BAAI/bge-reranker-v2-m3"
     reranker_candidate_pool: int = 30
+    enable_llm_response_rewrite: bool = True
+    gemini_api_key: str = ""
+    gemini_model_name: str = "gemini-1.5-flash"
+    gemini_timeout_seconds: float = 6.0
+    gemini_temperature: float = 0.2
     enable_user_query_logging: bool = True
     user_query_log_path: str = "ai_log/user_questions.jsonl"
 
