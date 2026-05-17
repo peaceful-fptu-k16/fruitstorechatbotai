@@ -69,3 +69,8 @@
 - User request: "hãy thử chạy dự án và up lên github: https://github.com/peaceful-fptu-k16/fruitstorechatbotai.git"
 - Assistant action: Started frontend successfully, started backend in offline-safe mode for quick runtime validation, verified health and frontend HTTP status, initialized git repository, committed project, configured remote origin, and pushed branch `main` to the provided GitHub repository.
 - Scope: runtime smoke checks, repository initialization, commit history creation, remote setup, and GitHub push.
+
+## 2026-05-17 (professional README upgrade)
+- User request: "hãy chỉnh sửa lại readme cho chi tiết và chuyên nghiệp hơn rồi commit lên git"
+- Assistant action: Rewrote README with professional structure including architecture, setup, configuration matrix, API reference, model strategy/fallbacks, observability, testing, troubleshooting, and security guidance; then prepared commit and push.
+- Scope: documentation quality uplift and release-ready onboarding instructions.
