@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.db
+.pytest_cache/
+.venv/
+venv/
+
+# Node / Next
+node_modules/
+.next/
+out/
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Runtime logs
+ai_log/user_questions.jsonl
+
+# OS
+.DS_Store
+Thumbs.db
