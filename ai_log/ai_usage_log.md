@@ -64,3 +64,8 @@
 - User request: "hãy làm giàu data lên và cho thêm nhiều thuộc tính của quả. Tôi muốn chatbot trả lời 1 cách tự nhiên hơn, không bị ràng buộc"
 - Assistant action: Expanded product schema with richer taste/nutrition/usage attributes, seeded a broader fruit catalog, upgraded recommendation constraints and scoring to use new attributes, improved semantic indexing text, and rewrote recommendation phrasing to be more conversational and less rigid.
 - Scope: product model/schema/mapper, seed data and schema patching, memory + recommendation + router logic, chat/recommend response formatting, frontend product type/card, README, and regression tests.
+
+## 2026-05-17 (run project and publish GitHub)
+- User request: "hãy thử chạy dự án và up lên github: https://github.com/peaceful-fptu-k16/fruitstorechatbotai.git"
+- Assistant action: Started frontend successfully, started backend in offline-safe mode for quick runtime validation, verified health and frontend HTTP status, initialized git repository, committed project, configured remote origin, and pushed branch `main` to the provided GitHub repository.
+- Scope: runtime smoke checks, repository initialization, commit history creation, remote setup, and GitHub push.
