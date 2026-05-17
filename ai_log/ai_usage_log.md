@@ -109,3 +109,25 @@
 - User request: "hãy xóa hết phần sử dụng rule based để trả lời câu hỏi và không cần fallback", đồng thời log từng câu hỏi/câu trả lời và tự rút kinh nghiệm chất lượng trả lời.
 - Assistant action: Added strict `llm_only` response mode (no deterministic fallback), raised explicit 503 when Gemini is unavailable in strict mode, logged each Q/A pair to JSONL, and added Gemini-based per-answer quality review fields (score/issues/lessons) for continuous tuning.
 - Scope: response generation mode, chat/recommend endpoint flow, observability logs, environment config, and regression tests.
+
+## 2026-05-17 (verify qa log after local key)
+- User request: "chạy thử một vòng hội thoại sau khi nạp key local để xác nhận log Q/A + quality review đã ghi đúng vào qa_pairs.jsonl"
+- Assistant action: Executed end-to-end check and confirmed backend was in `llm_only` while Gemini key was not loaded, resulting in 503 responses and no `qa_pairs.jsonl`; then re-sanitized tracked `.env.example` to avoid leaking secrets and provided strict local-key loading steps.
+- Scope: runtime verification, secure env handling, and QA logging readiness check.
+
+## 2026-05-17 (create local env file)
+- User request: "hãy làm cho tôi" (create local `.env` setup for Gemini runtime).
+- Assistant action: Created local `.env` file with `GEMINI_API_KEY=` placeholder and `RESPONSE_GENERATION_MODE=llm_only`, then verified file existence and git-safe status.
+- Scope: local runtime env bootstrap and secret-safe workflow.
+
+## 2026-05-17 (rerun after user added api key)
+- User request: "tôi đã thêm api key hãy chạy lại"
+- Assistant action: Re-ran runtime verification, identified hidden BOM in `.env` key name causing `gemini_key_configured=false`, rewrote `.env` to UTF-8 without BOM, set valid model `gemini-2.5-flash`, and re-ran chat checks.
+- Result: `/chat` returned 200 for test queries and `qa_pairs.jsonl` was created with records; answer-quality review entries were present but currently in `review_mode=error` due non-JSON review payload parsing.
+- Scope: runtime env parsing fix, Gemini model compatibility check, and QA log verification.
+
+## 2026-05-17 (stabilize Gemini quality-review JSON)
+- User request: Tune prompt/config so Gemini review returns stable JSON and verify `review_mode=gemini` with score/issues/lessons.
+- Assistant action: Updated Gemini call config for review with higher output budget and disabled thinking budget to prevent `MAX_TOKENS` empty outputs, added JSON-like normalization parser fallback, and reran end-to-end session checks.
+- Result: New `qa_pairs.jsonl` entries for session `qa-check-session-6` show `review_mode=gemini` with populated `score`, `issues`, and `lessons`.
+- Scope: response rewriter review pipeline and QA log validation.

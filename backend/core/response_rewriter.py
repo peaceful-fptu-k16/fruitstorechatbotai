@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
+import re
 from typing import Any, Optional
 
 import httpx
@@ -180,7 +181,7 @@ class ResponseRewriter:
             f"Answer: {answer}\n"
         )
 
-        raw = self._call_gemini(prompt=prompt, max_output_tokens=280)
+        raw = self._call_gemini(prompt=prompt, max_output_tokens=420, json_response=True)
         if not raw:
             return {
                 "review_mode": "error",
@@ -192,6 +193,9 @@ class ResponseRewriter:
             }
 
         parsed = self._parse_json_payload(raw)
+        if not parsed:
+            parsed = self._parse_json_payload(self._normalize_json_like(raw))
+
         if not parsed:
             return {
                 "review_mode": "error",
@@ -305,7 +309,7 @@ class ResponseRewriter:
 
         return _clean_text(generated)
 
-    def _call_gemini(self, *, prompt: str, max_output_tokens: int) -> Optional[str]:
+    def _call_gemini(self, *, prompt: str, max_output_tokens: int, json_response: bool = False) -> Optional[str]:
         if not self._can_use_gemini():
             return None
 
@@ -315,8 +319,11 @@ class ResponseRewriter:
                 "temperature": self.gemini_temperature,
                 "topP": 0.9,
                 "maxOutputTokens": max_output_tokens,
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         }
+        if json_response:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{self.gemini_model_name}:generateContent?key={self.gemini_api_key}"
@@ -357,6 +364,36 @@ class ResponseRewriter:
         if not isinstance(payload, dict):
             return None
         return payload
+
+    @staticmethod
+    def _normalize_json_like(text: str) -> str:
+        candidate = text.strip()
+        if not candidate:
+            return candidate
+
+        if candidate.startswith("```"):
+            candidate = candidate.strip("`")
+            candidate = candidate.replace("json", "", 1).strip()
+
+        candidate = candidate.replace("\r\n", "\n").replace("\r", "\n")
+
+        # Common Gemini variants: Python-like booleans/None and trailing commas.
+        candidate = re.sub(r"\bTrue\b", "true", candidate)
+        candidate = re.sub(r"\bFalse\b", "false", candidate)
+        candidate = re.sub(r"\bNone\b", "null", candidate)
+
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = candidate[start : end + 1]
+
+        candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+
+        # Best-effort conversion for single-quoted dict-like outputs.
+        if "'" in candidate and '"' not in candidate:
+            candidate = candidate.replace("'", '"')
+
+        return candidate
 
     @staticmethod
     def _extract_gemini_text(payload: dict) -> Optional[str]:
