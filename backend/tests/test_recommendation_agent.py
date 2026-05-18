@@ -247,3 +247,83 @@ def test_recommendation_returns_empty_when_constraints_too_strict(db_session: Se
 
     assert products == []
     assert "không tìm thấy" in reason.lower()
+
+
+def test_parse_preferences_supports_min_budget_phrase() -> None:
+    agent = RecommendationAgent()
+
+    constraints = agent.parse_preferences("quả ngọt trên 200k", PreferenceProfile())
+
+    assert constraints["min_price"] == 200_000
+    assert constraints["max_price"] is None
+
+
+def test_parse_preferences_supports_budget_range_phrase() -> None:
+    agent = RecommendationAgent()
+
+    constraints = agent.parse_preferences("trai ngot tu 50k den 100k", PreferenceProfile())
+
+    assert constraints["min_price"] == 50_000
+    assert constraints["max_price"] == 100_000
+
+
+def test_recommendation_respects_min_budget_query(db_session: Session) -> None:
+    agent = RecommendationAgent()
+
+    products, _reason = agent.recommend(
+        db_session,
+        query="quả ngọt trên 200k",
+        profile=PreferenceProfile(),
+        explicit_budget=None,
+        limit=4,
+        retriever=None,
+        use_deep_learning=False,
+    )
+
+    assert products == []
+
+
+def test_recommendation_prioritizes_requested_entity_then_adds_similar(db_session: Session) -> None:
+    agent = RecommendationAgent()
+
+    products, reason = agent.recommend(
+        db_session,
+        query="tôi muốn mua cam",
+        profile=PreferenceProfile(),
+        explicit_budget=None,
+        limit=4,
+        retriever=None,
+        use_deep_learning=False,
+    )
+
+    assert products
+    assert "cam" in products[0].name.lower()
+    assert any("cam" not in product.name.lower() for product in products[1:])
+    assert "đúng loại bạn cần" in reason.lower()
+
+
+def test_recommendation_keeps_requested_entity_first_even_with_dl_scores(db_session: Session) -> None:
+    retriever = DummyRetriever(
+        supports_deep_learning=True,
+        score_by_name={
+            "Nho Mẫu Đơn": 0.99,
+            "Dứa Mật": 0.92,
+            "Cam Úc": 0.21,
+        },
+    )
+    retriever.bind_products(db_session)
+
+    agent = RecommendationAgent()
+    products, reason = agent.recommend(
+        db_session,
+        query="tôi muốn mua cam",
+        profile=PreferenceProfile(),
+        explicit_budget=None,
+        limit=4,
+        retriever=retriever,
+    )
+
+    assert products
+    assert "cam" in products[0].name.lower()
+    assert any("cam" not in product.name.lower() for product in products[1:])
+    assert "khớp ngữ nghĩa" in reason.lower()

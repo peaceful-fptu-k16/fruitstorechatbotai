@@ -144,6 +144,30 @@ IN_DOMAIN_GUARD_KEYWORDS: tuple[str, ...] = (
     "hoan tien",
     "bao quan",
     "tu lanh",
+    "co qua gi",
+    "co trai gi",
+    "hom nay co qua gi",
+    "hom nay co trai gi",
+    "shop co gi hom nay",
+    "cua hang co gi hom nay",
+    "co chuoi khong",
+)
+
+FRUIT_ENTITY_KEYWORDS: tuple[str, ...] = (
+    "cam",
+    "xoai",
+    "nho",
+    "buoi",
+    "chuoi",
+    "dua",
+    "tao",
+    "oi",
+    "kiwi",
+    "le",
+    "man",
+    "dau",
+    "viet quat",
+    "thanh long",
 )
 
 PREFERENCE_GUARD_KEYWORDS: tuple[str, ...] = (
@@ -409,9 +433,42 @@ class RouterAgent:
             return pretrained_result
 
         message = normalize_text(user_message)
+
+        if any(
+            phrase in message
+            for phrase in (
+                "hom nay co qua gi",
+                "hom nay co trai gi",
+                "shop co gi hom nay",
+                "cua hang co gi hom nay",
+                "co qua gi",
+                "co trai gi",
+            )
+        ):
+            return IntentResult(intent="available_products", confidence=0.78, reason="catalog_heuristic")
+
+        explicit_inventory_patterns = (
+            "con hang",
+            "con khong",
+            "het hang",
+            "ton kho",
+            "con bao nhieu",
+        )
+        has_direct_entity_stock_question = any(
+            re.search(rf"\bco\s+{re.escape(entity)}\s+khong\b", message) is not None
+            for entity in FRUIT_ENTITY_KEYWORDS
+        )
+        if has_direct_entity_stock_question or any(pattern in message for pattern in explicit_inventory_patterns):
+            return IntentResult(intent="inventory_check", confidence=0.82, reason="entity_inventory_heuristic")
+
         for rule in self.rules:
             if any(keyword in message for keyword in rule.keywords):
                 return IntentResult(intent=rule.intent, confidence=rule.confidence, reason="keyword_match")
+
+        if any(entity in message for entity in FRUIT_ENTITY_KEYWORDS) and any(
+            keyword in message for keyword in ("mua", "goi y", "tu van", "nen mua")
+        ):
+            return IntentResult(intent="recommendation", confidence=0.74, reason="entity_recommend_heuristic")
 
         if any(token in message for token in ("ngot", "chua", "mem", "hat", "mua")):
             return IntentResult(intent="recommendation", confidence=0.68, reason="preference_heuristic")

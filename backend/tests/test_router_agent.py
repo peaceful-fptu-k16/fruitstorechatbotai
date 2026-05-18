@@ -91,3 +91,29 @@ def test_router_keeps_out_of_domain_when_query_is_truly_unrelated() -> None:
     assert result.intent == "out_of_domain"
     assert result.reason == "pretrained_semantic_router"
     assert result.confidence == 0.78
+
+
+def test_router_maps_generic_fruit_catalog_question_to_available_products() -> None:
+    router = RouterAgent(
+        use_pretrained_router=False,
+        semantic_backend=DummySemanticBackend(intent="out_of_domain", confidence=0.88, candidates=[("out_of_domain", 0.88)]),
+        min_intent_confidence=0.55,
+    )
+
+    result = router.route("Hôm nay có quả gì?")
+
+    assert result.intent == "available_products"
+    assert result.reason in {"catalog_heuristic", "pretrained_semantic_router_guard"}
+
+
+def test_router_maps_fruit_availability_question_to_inventory_check() -> None:
+    router = RouterAgent(
+        use_pretrained_router=False,
+        semantic_backend=DummySemanticBackend(intent="out_of_domain", confidence=0.9, candidates=[("out_of_domain", 0.9)]),
+        min_intent_confidence=0.55,
+    )
+
+    result = router.route("Cửa hàng mình có chuối không?")
+
+    assert result.intent == "inventory_check"
+    assert result.reason == "entity_inventory_heuristic"

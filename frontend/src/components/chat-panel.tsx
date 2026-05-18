@@ -41,6 +41,90 @@ const INTENT_LABELS: Record<string, { text: string; cls: string }> = {
   fallback:         { text: "💬 Chung",           cls: "bg-gray-100       text-gray-500" },
 };
 
+const FRUIT_ENTITY_ALIASES: string[] = [
+  "thanh long",
+  "viet quat",
+  "xoai",
+  "cam",
+  "nho",
+  "buoi",
+  "tao",
+  "dua",
+  "chuoi",
+  "oi",
+  "kiwi",
+  "le",
+  "man",
+  "dau",
+];
+
+const FRUIT_ENTITY_DISPLAY: Record<string, string> = {
+  "thanh long": "Thanh long",
+  "viet quat": "Việt quất",
+  xoai: "Xoài",
+  cam: "Cam",
+  nho: "Nho",
+  buoi: "Bưởi",
+  tao: "Táo",
+  dua: "Dứa",
+  chuoi: "Chuối",
+  oi: "Ổi",
+  kiwi: "Kiwi",
+  le: "Lê",
+  man: "Mận",
+  dau: "Dâu",
+};
+
+function normalizeVi(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractRequestedEntities(message: string): string[] {
+  const normalized = normalizeVi(message);
+  const found: string[] = [];
+
+  for (const alias of FRUIT_ENTITY_ALIASES.slice().sort((left, right) => right.length - left.length)) {
+    const matcher = new RegExp(`(^|\\s)${escapeRegExp(alias)}(?=\\s|$)`);
+    if (!matcher.test(normalized)) {
+      continue;
+    }
+    if (!found.includes(alias)) {
+      found.push(alias);
+    }
+  }
+
+  return found;
+}
+
+function productMatchesAnyEntity(productName: string, entities: string[]): boolean {
+  const normalizedName = normalizeVi(productName);
+  return entities.some((entity) => normalizedName.includes(entity));
+}
+
+function joinHumanList(items: string[]): string {
+  if (!items.length) {
+    return "";
+  }
+  if (items.length === 1) {
+    return items[0];
+  }
+  return `${items.slice(0, -1).join(", ")} và ${items[items.length - 1]}`;
+}
+
+function toEntityDisplayName(entity: string): string {
+  return FRUIT_ENTITY_DISPLAY[entity] ?? entity;
+}
+
 function IntentBadge({ intent, confidence }: { intent: string; confidence?: number }) {
   const info = INTENT_LABELS[intent] ?? { text: intent, cls: "bg-gray-100 text-gray-500" };
   return (
@@ -85,12 +169,64 @@ export function ChatPanel() {
 
   const canSend = input.trim().length > 0 && !loading;
 
-  const lastProducts = useMemo(() => {
+  const productPanelContext = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].products?.length) return messages[i].products as Product[];
+      const assistantMessage = messages[i];
+      if (assistantMessage.role !== "assistant" || !assistantMessage.products?.length) {
+        continue;
+      }
+
+      let sourceQuery = "";
+      for (let j = i - 1; j >= 0; j--) {
+        if (messages[j].role === "user") {
+          sourceQuery = messages[j].text;
+          break;
+        }
+      }
+
+      const products = assistantMessage.products as Product[];
+      const requestedEntities = extractRequestedEntities(sourceQuery);
+      if (!requestedEntities.length) {
+        return {
+          intent: assistantMessage.intent,
+          products,
+          requestedEntities: [] as string[],
+          focusProducts: products,
+          similarProducts: [] as Product[],
+        };
+      }
+
+      const focusProducts = products.filter((product) =>
+        productMatchesAnyEntity(product.name, requestedEntities)
+      );
+      const similarProducts = products.filter(
+        (product) => !productMatchesAnyEntity(product.name, requestedEntities)
+      );
+
+      return {
+        intent: assistantMessage.intent,
+        products,
+        requestedEntities,
+        focusProducts: focusProducts.length ? focusProducts : products,
+        similarProducts: focusProducts.length ? similarProducts : [],
+      };
     }
-    return [];
+
+    return {
+      intent: undefined,
+      products: [] as Product[],
+      requestedEntities: [] as string[],
+      focusProducts: [] as Product[],
+      similarProducts: [] as Product[],
+    };
   }, [messages]);
+
+  const lastProducts = productPanelContext.products;
+
+  const showGroupedRecommendations =
+    productPanelContext.intent === "recommendation" &&
+    productPanelContext.requestedEntities.length > 0 &&
+    productPanelContext.focusProducts.length > 0;
 
   async function submitMessage(rawMessage: string) {
     const message = rawMessage.trim();
@@ -288,18 +424,87 @@ export function ChatPanel() {
                 key="products"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="space-y-3"
+                className="space-y-4"
               >
-                {lastProducts.map((product, i) => (
-                  <motion.div
-                    key={product.id}
-                    initial={{ opacity: 0, y: 18, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0,  scale: 1    }}
-                    transition={{ delay: i * 0.08, type: "spring", stiffness: 280, damping: 24 }}
-                  >
-                    <ProductCard product={product} />
-                  </motion.div>
-                ))}
+                {showGroupedRecommendations && (
+                  <div className="rounded-2xl border border-accent/20 bg-gradient-to-r from-accent-light/75 to-mellow px-3.5 py-3">
+                    <p className="text-xs font-semibold text-ink/75">
+                      Ưu tiên đúng loại bạn hỏi:
+                      <span className="ml-1 text-accent">
+                        {joinHumanList(productPanelContext.requestedEntities.map(toEntityDisplayName))}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-ink/55">
+                      Mình chia danh sách theo 2 nhóm để bạn chốt nhanh: đúng loại trước, tương tự sau.
+                    </p>
+                  </div>
+                )}
+
+                {showGroupedRecommendations ? (
+                  <>
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between px-0.5">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-accent/90">
+                          Đúng loại bạn hỏi
+                        </p>
+                        <span className="rounded-full bg-accent-light px-2 py-0.5 text-[10px] font-semibold text-accent">
+                          {productPanelContext.focusProducts.length} mục
+                        </span>
+                      </div>
+
+                      {productPanelContext.focusProducts.map((product, i) => (
+                        <motion.div
+                          key={`focus-${product.id}`}
+                          initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          transition={{ delay: i * 0.07, type: "spring", stiffness: 280, damping: 24 }}
+                        >
+                          <ProductCard product={product} variant="requested" />
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    {productPanelContext.similarProducts.length > 0 && (
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between px-0.5">
+                          <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-sky-700">
+                            Gợi ý tương tự
+                          </p>
+                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                            {productPanelContext.similarProducts.length} mục
+                          </span>
+                        </div>
+                        <p className="px-0.5 text-[11px] text-ink/50">
+                          Các lựa chọn này có độ ngọt, độ chua hoặc độ mọng nước gần giống.
+                        </p>
+
+                        {productPanelContext.similarProducts.map((product, i) => (
+                          <motion.div
+                            key={`similar-${product.id}`}
+                            initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            transition={{ delay: (productPanelContext.focusProducts.length + i) * 0.06, type: "spring", stiffness: 280, damping: 24 }}
+                          >
+                            <ProductCard product={product} variant="similar" />
+                          </motion.div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="space-y-3">
+                    {lastProducts.map((product, i) => (
+                      <motion.div
+                        key={product.id}
+                        initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{ delay: i * 0.08, type: "spring", stiffness: 280, damping: 24 }}
+                      >
+                        <ProductCard product={product} />
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             ) : (
               <motion.div

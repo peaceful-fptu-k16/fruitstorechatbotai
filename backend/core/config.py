@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,7 +28,7 @@ class Settings(BaseSettings):
     use_pretrained_reranker: bool = True
     pretrained_reranker_model_name: str = "BAAI/bge-reranker-v2-m3"
     reranker_candidate_pool: int = 30
-    response_generation_mode: str = "llm_only"
+    response_generation_mode: str = "lm_studio"
     enable_llm_response_rewrite: bool = True
     gemini_api_key: str = ""
     gemini_model_name: str = "gemini-1.5-flash"
@@ -52,4 +53,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    env_file = ".env.secret" if Path(".env.secret").exists() else ".env"
+    return Settings(_env_file=env_file)

@@ -131,3 +131,57 @@
 - Assistant action: Updated Gemini call config for review with higher output budget and disabled thinking budget to prevent `MAX_TOKENS` empty outputs, added JSON-like normalization parser fallback, and reran end-to-end session checks.
 - Result: New `qa_pairs.jsonl` entries for session `qa-check-session-6` show `review_mode=gemini` with populated `score`, `issues`, and `lessons`.
 - Scope: response rewriter review pipeline and QA log validation.
+
+## 2026-05-18 (LM migration + RAG re-integration)
+- User request: "tôi đã chuyển sang sử dụng LM làm LLM và hãy tích hợp lại RAG cho project"
+- Assistant action: Integrated RAG-grounded context into LLM rewrite prompts, wired chat/recommend endpoints to pass retrieval evidence (citations + product facts), added strict `llm_only` LM Studio compatibility path, updated LM-first env/docs defaults, and expanded regression tests for LM strict mode + RAG prompt grounding.
+- Result: Backend regression tests passed (`test_response_rewriter`, `test_smoke`, `test_recommendation_agent`, `test_router_agent`, `test_retriever_reranking`).
+- Scope: `backend/core/response_rewriter.py`, `backend/api/chat.py`, `backend/api/recommend.py`, `backend/core/config.py`, `backend/tests/test_response_rewriter.py`, `.env.example`, `README.md`.
+
+## 2026-05-18 (load config from .env.secret)
+- User request: Received runtime error `Chế độ LLM-only đang bật nhưng LLM không trả về nội dung hợp lệ...` and asked to load configuration from `.env.secret`.
+- Assistant action: Updated settings loader to prioritize `.env.secret` when present (fallback `.env`), set explicit `RESPONSE_GENERATION_MODE=lm_studio` in `.env.secret`, and validated effective runtime config values.
+- Result: Effective settings now read LM endpoint from `.env.secret` with `response_generation_mode=lm_studio`; smoke tests passed.
+- Scope: `backend/core/config.py`, `.env.secret`.
+
+## 2026-05-18 (LM Studio invalid response diagnostics)
+- User request: Reported error `LM Studio không trả về nội dung hợp lệ.`.
+- Assistant action: Improved LM Studio client handling to surface concrete provider errors (HTTP status/body, timeout, connect error), removed non-standard `thinking` payload for better compatibility, and added runtime propagation of detailed LM Studio error instead of generic message.
+- Result: Runtime now reports actionable root cause (e.g., timeout to `http://100.124.21.49:1234/v1/chat/completions`) and existing rewriter tests remain green.
+- Scope: `backend/core/response_rewriter.py`.
+
+## 2026-05-18 (LM payload no choices)
+- User request: Reported error `LM Studio trả payload không có choices...`.
+- Assistant action: Added LM Studio URL normalization/fallback (`/chat/completions` and `/v1/chat/completions`), parsed explicit `error` payloads even on HTTP 200, supported alternative payload text extraction (`output_text`/`output`), and updated `.env.secret` base URL to `/v1`.
+- Result: Generic `no choices` error is eliminated; runtime now reports precise provider state: HTTP 400 `No models loaded` for chat completions.
+- Scope: `backend/core/response_rewriter.py`, `.env.secret`.
+
+## 2026-05-18 (LM Studio only embedding model loaded)
+- User request: Shared LM Studio logs showing `/chat/completions` mismatch and `No models loaded` while `/v1/models` returned only `text-embedding-nomic-embed-text-v1.5`.
+- Assistant action: Added LM model autodetection from `/v1/models`, relaxed strict requirement for explicit `LM_STUDIO_MODEL_NAME`, and added explicit runtime error when only embedding models are available.
+- Result: Runtime now reports a direct actionable error: `LM Studio hiện chỉ có model embedding, chưa có model chat...` instead of generic invalid payload errors.
+- Scope: `backend/core/response_rewriter.py`.
+
+## 2026-05-18 (verify updated LM base URL)
+- User request: "tôi cập nhật lại base_url mới"
+- Assistant action: Read updated `.env.secret`, then verified `/v1/models`, `/v1/chat/completions`, and internal `ResponseRewriter.rewrite()` against the new endpoint.
+- Result: New base URL works; models endpoint returns chat model (`qwen/qwen3-4b-2507`), chat completions return 200 with content, and rewrite mode succeeds in `lm_studio`.
+- Scope: runtime verification only (no additional config/code changes required).
+
+## 2026-05-18 (precision hardening from QA review)
+- User request: Improve system precision based on QA log findings (entity hard constraint, two-sided budget parser, stronger in-domain routing, output validator, reduced over-suggestion, KPI tracking).
+- Assistant action: Implemented entity hard-filter and min/max/range budget parsing in recommendation pipeline; strengthened router heuristics for fruit in-domain queries; added answer validator/repair guard before returning chat responses (fix malformed score token and enforce entity/budget consistency); reduced over-suggestion behavior in available/recommendation phrasing; added KPI report utility from `qa_pairs.jsonl`.
+- Result: Regression tests passed (`31 passed`) and KPI script runs with current metrics output.
+- Scope: `backend/agents/recommendation_agent.py`, `backend/agents/router_agent.py`, `backend/api/chat.py`, `backend/evaluation/qa_kpi_report.py`, `backend/tests/test_recommendation_agent.py`, `backend/tests/test_router_agent.py`, `backend/tests/test_smoke.py`, `README.md`.
+
+## 2026-05-18 (requested fruit first + similar alternatives)
+- User request: "hệ thống gợi ý sản phẩm chạy chưa chuẩn, khi người dùng hỏi về 1 loại quả thì nên gợi ý loại quả đó đầu danh sách, có thể hiển thị thêm 1 vài loại quả có thuộc tính tương tự"
+- Assistant action: Updated recommendation ranking to always prioritize products matching requested fruit entities at the top, then fill remaining slots with non-matching products that are most similar by taste/nutrition attributes; adjusted recommendation reason text to explain this behavior; updated chat output guard to keep requested-entity products first without dropping similar alternatives.
+- Result: Targeted regression tests passed (`25 passed`) for recommendation + smoke flows.
+- Scope: `backend/agents/recommendation_agent.py`, `backend/api/chat.py`, `backend/tests/test_recommendation_agent.py`, `backend/tests/test_smoke.py`.
+
+## 2026-05-18 (frontend UX grouping for recommendations)
+- User request: "oke hãy chỉnh sửa UX"
+- Assistant action: Updated chat product panel UX to clearly separate recommendation results into two sections when a fruit entity is detected (requested fruit first, similar alternatives after), added contextual explainer text, and added visual badges on product cards (`Ưu tiên đúng loại`, `Gần giống khẩu vị`) to improve scanning and decision speed.
+- Result: Frontend TypeScript validation passed (`npx tsc --noEmit` with no diagnostics) and editor diagnostics show no errors in modified frontend files.
+- Scope: `frontend/src/components/chat-panel.tsx`, `frontend/src/components/product-card.tsx`.

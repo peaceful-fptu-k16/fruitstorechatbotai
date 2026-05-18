@@ -107,3 +107,60 @@ def test_rewriter_llm_only_raises_when_gemini_returns_none(monkeypatch) -> None:
             language="vi",
             allow_follow_up=True,
         )
+
+
+def test_rewriter_llm_only_uses_lm_studio_when_configured(monkeypatch) -> None:
+    rewriter = ResponseRewriter(
+        generation_mode="llm_only",
+        llm_enabled=True,
+        gemini_api_key="",
+        lm_studio_model_name="qwen-test",
+    )
+    monkeypatch.setattr(rewriter, "_rewrite_with_lm_studio", lambda **_: "Nội dung do LM Studio trả về.")
+
+    rewritten, mode = rewriter.rewrite(
+        base_answer="Mình có vài gợi ý phù hợp.",
+        user_message="Gợi ý cho tôi trái ít đường",
+        intent="recommendation",
+        session_id="session-style-6",
+        language="vi",
+        allow_follow_up=True,
+        rag_context=["product:12 - Nho Mẫu Đơn điểm phù hợp cao"],
+    )
+
+    assert mode == "lm_studio_strict"
+    assert rewritten == "Nội dung do LM Studio trả về."
+
+
+def test_lm_studio_prompt_includes_rag_grounding(monkeypatch) -> None:
+    rewriter = ResponseRewriter(
+        generation_mode="lm_studio",
+        llm_enabled=True,
+        lm_studio_model_name="qwen-test",
+    )
+
+    captured_prompt = {"value": ""}
+
+    def _fake_call_lm_studio(*, prompt: str) -> str:
+        captured_prompt["value"] = prompt
+        return "Mình đã viết lại từ RAG."
+
+    monkeypatch.setattr(rewriter, "_call_lm_studio", _fake_call_lm_studio)
+
+    rewritten, mode = rewriter.rewrite(
+        base_answer="Bản nháp có dữ kiện giá và tồn kho.",
+        user_message="Gợi ý xoài ngọt",
+        intent="recommendation",
+        session_id="session-style-7",
+        language="vi",
+        allow_follow_up=False,
+        rag_context=[
+            "product:2: Xoài Cát Hòa Lộc giá 85.000đ, còn 40",
+            "faq:shipping: giao nội thành 2-4 giờ",
+        ],
+    )
+
+    assert mode == "lm_studio"
+    assert rewritten == "Mình đã viết lại từ RAG."
+    assert "Nguồn dữ kiện truy hồi (RAG)" in captured_prompt["value"]
+    assert "product:2" in captured_prompt["value"]

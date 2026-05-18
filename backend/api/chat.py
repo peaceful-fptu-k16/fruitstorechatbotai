@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -17,6 +18,24 @@ from backend.schemas import ChatRequest, ChatResponse, CitationOut
 
 router = APIRouter(tags=["chat"])
 settings = get_settings()
+
+
+FRUIT_ENTITY_ALIASES: tuple[str, ...] = (
+    "thanh long",
+    "viet quat",
+    "xoai",
+    "cam",
+    "nho",
+    "buoi",
+    "tao",
+    "dua",
+    "chuoi",
+    "oi",
+    "kiwi",
+    "le",
+    "man",
+    "dau",
+)
 
 
 def _citations_from_results(results: list[dict], source_type: str) -> list[CitationOut]:
@@ -37,12 +56,171 @@ def _format_vnd(price: int) -> str:
     return f"{price:,.0f}".replace(",", ".") + "đ"
 
 
+def _extract_question_entities(user_message: str) -> list[str]:
+    normalized = normalize_text(user_message)
+    entities: list[str] = []
+    seen: set[str] = set()
+
+    for alias in sorted(FRUIT_ENTITY_ALIASES, key=len, reverse=True):
+        pattern = rf"(?<!\w){re.escape(alias)}(?!\w)"
+        if re.search(pattern, normalized) is None:
+            continue
+        if alias in seen:
+            continue
+        seen.add(alias)
+        entities.append(alias)
+
+    return entities
+
+
+def _extract_answer_prices(answer: str) -> list[int]:
+    prices: list[int] = []
+    for match in re.finditer(r"(\d{1,3}(?:[\.\s]\d{3})+|\d+)\s*(đ|d|vnd|k)", answer.lower()):
+        raw_value = re.sub(r"[^\d]", "", match.group(1))
+        if not raw_value:
+            continue
+        value = int(raw_value)
+        if match.group(2) == "k" and value < 1000:
+            value *= 1000
+        prices.append(value)
+    return prices
+
+
+def _price_within_bounds(price: int, min_price: int | None, max_price: int | None) -> bool:
+    if min_price is not None and price < min_price:
+        return False
+    if max_price is not None and price > max_price:
+        return False
+    return True
+
+
+def _sanitize_answer_output(answer: str) -> str:
+    cleaned = re.sub(r"(\d+)\s*/\s*-\s*10", r"\1/10", answer)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _build_safe_recommendation_answer(*, products: list[Product], constraints: dict) -> str:
+    if not products:
+        return "Mình chưa tìm được sản phẩm khớp đúng tiêu chí hiện tại của bạn."
+
+    min_price = constraints.get("min_price")
+    max_price = constraints.get("max_price") or constraints.get("budget")
+    if min_price is not None and max_price is not None:
+        budget_text = f" trong khoảng {_format_vnd(int(min_price))} đến {_format_vnd(int(max_price))}"
+    elif min_price is not None:
+        budget_text = f" từ {_format_vnd(int(min_price))} trở lên"
+    elif max_price is not None:
+        budget_text = f" dưới {_format_vnd(int(max_price))}"
+    else:
+        budget_text = ""
+
+    picks = products[:2]
+    details = "; ".join(
+        f"{product.name} (giá {_format_vnd(product.price)}, ngọt {product.sweetness_level}/10, chua {product.sourness_level}/10)"
+        for product in picks
+    )
+    return f"Mình đã lọc theo tiêu chí của bạn{budget_text}: {details}."
+
+
+def _validate_and_repair_answer(
+    *,
+    intent: str,
+    user_message: str,
+    answer: str,
+    products: list[Product],
+    constraints: dict,
+) -> tuple[str, list[Product], bool]:
+    repaired = False
+    fixed_answer = _sanitize_answer_output(answer)
+    normalized_answer = normalize_text(fixed_answer)
+
+    requested_entities = _extract_question_entities(user_message)
+    if requested_entities and not any(entity in normalized_answer for entity in requested_entities):
+        matched_products = [
+            product
+            for product in products
+            if any(entity in normalize_text(product.name) for entity in requested_entities)
+        ]
+        if matched_products:
+            repaired = True
+            if intent == "recommendation":
+                matched_ids = {product.id for product in matched_products}
+                products = matched_products + [product for product in products if product.id not in matched_ids]
+                fixed_answer = _build_safe_recommendation_answer(products=products, constraints=constraints)
+            else:
+                products = matched_products
+
+            if intent == "inventory_check":
+                top = products[0]
+                fixed_answer = f"{top.name} đang còn {top.stock} sản phẩm trong kho."
+            elif intent == "available_products":
+                top = products[0]
+                fixed_answer = (
+                    f"Hôm nay {top.name} đang khá ổn: {_product_taste_brief(top)}, "
+                    f"giá {_format_vnd(top.price)}, còn {top.stock}."
+                )
+
+    if intent == "recommendation":
+        min_price = constraints.get("min_price")
+        max_price = constraints.get("max_price") or constraints.get("budget")
+
+        if min_price is not None or max_price is not None:
+            filtered_products = [
+                product for product in products if _price_within_bounds(product.price, min_price=min_price, max_price=max_price)
+            ]
+            if len(filtered_products) != len(products):
+                products = filtered_products
+                repaired = True
+
+            answer_prices = _extract_answer_prices(fixed_answer)
+            if answer_prices and any(
+                not _price_within_bounds(price, min_price=min_price, max_price=max_price) for price in answer_prices
+            ):
+                repaired = True
+
+            if repaired:
+                fixed_answer = _build_safe_recommendation_answer(products=products, constraints=constraints)
+
+    return fixed_answer, products, repaired
+
+
 def _join_human_list(items: list[str]) -> str:
     if not items:
         return ""
     if len(items) == 1:
         return items[0]
     return ", ".join(items[:-1]) + f" và {items[-1]}"
+
+
+def _build_rag_context_for_rewrite(*, citations: list[CitationOut], products: list[Product]) -> list[str]:
+    raw_lines: list[str] = []
+
+    for citation in citations[:4]:
+        snippet = " ".join(citation.snippet.strip().split())
+        if not snippet:
+            continue
+        raw_lines.append(f"{citation.source_id}: {snippet}")
+
+    for product in products[:4]:
+        raw_lines.append(
+            f"{product.name}: giá {_format_vnd(product.price)}, còn {product.stock}, "
+            f"ngọt {product.sweetness_level}/10, chua {product.sourness_level}/10, "
+            f"mọng nước {product.juiciness_level}/10, thơm {product.aroma_level}/10"
+        )
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for line in raw_lines:
+        key = normalize_text(line)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(line)
+        if len(deduped) >= 8:
+            break
+
+    return deduped
 
 
 def _build_recommendation_answer(
@@ -79,9 +257,14 @@ def _build_recommendation_answer(
     if constraints.get("max_sugar") is not None:
         criteria.append("trái ít đường")
 
-    budget = constraints.get("budget")
-    if budget is not None:
-        criteria.append(f"ngân sách không vượt quá {_format_vnd(int(budget))}")
+    min_price = constraints.get("min_price")
+    max_price = constraints.get("max_price") or constraints.get("budget")
+    if min_price is not None and max_price is not None:
+        criteria.append(f"ngân sách từ {_format_vnd(int(min_price))} đến {_format_vnd(int(max_price))}")
+    elif min_price is not None:
+        criteria.append(f"ngân sách từ {_format_vnd(int(min_price))} trở lên")
+    elif max_price is not None:
+        criteria.append(f"ngân sách không vượt quá {_format_vnd(int(max_price))}")
 
     style_idx = (sum(ord(ch) for ch in products[0].name) + len(criteria)) % 3
     intros = (
@@ -122,16 +305,7 @@ def _build_recommendation_answer(
 
         highlights.append(f"{product.name} ({', '.join(evidence[:7])})")
 
-    closings = (
-        "Nếu bạn muốn, mình có thể chốt thêm 1-2 lựa chọn đúng gu hơn theo mục đích sử dụng.",
-        "Bạn muốn mình thu hẹp tiếp theo kiểu ăn kiêng, ăn vặt hay ép nước không?",
-        "Nếu thích, mình sẽ lọc thêm bản tiết kiệm hơn hoặc bản cao cấp hơn cho bạn.",
-    )
-    more = ""
-    if len(products) > 3:
-        more = f" Mình còn {len(products) - 3} lựa chọn tương tự nữa."
-
-    return f"{intro} {reason} Gợi ý nổi bật: {'; '.join(highlights)}.{more} {closings[style_idx]}"
+    return f"{intro} {reason} Gợi ý nổi bật: {'; '.join(highlights)}."
 
 
 def _product_taste_brief(product: Product) -> str:
@@ -195,22 +369,26 @@ def _build_available_products_answer(
     if focus_products:
         top = focus_products[0]
         alternatives = [product for product in sorted(products, key=lambda item: _showcase_score(item, user_message), reverse=True) if product.id != top.id][:2]
-        followups = (
-            "Bạn muốn mình chọn thêm bản ngọt hơn hay bản ít chua hơn từ nhóm này không?",
-            "Nếu bạn thích, mình lọc tiếp theo ngân sách để chốt nhanh hơn.",
-            "Mình có thể chốt luôn 1-2 lựa chọn cùng gu để bạn dễ chọn.",
-        )
+        ask_more = any(keyword in normalized for keyword in ("them", "goi y", "tham khao", "loai khac", "so sanh"))
 
         answer = (
             f"Có nhé. Hôm nay {top.name} đang khá ổn: {_product_taste_brief(top)}, "
             f"giá {_format_vnd(top.price)}, còn {top.stock}."
         )
 
-        if alternatives:
+        if ask_more and alternatives:
             alt_names = _join_human_list([product.name for product in alternatives])
             answer += f" Nếu muốn đổi vị, bạn có thể tham khảo thêm {alt_names}."
 
-        return f"{answer} {followups[style_idx]}"
+        if ask_more:
+            followups = (
+                "Bạn muốn mình chọn thêm bản ngọt hơn hay bản ít chua hơn từ nhóm này không?",
+                "Nếu bạn thích, mình lọc tiếp theo ngân sách để chốt nhanh hơn.",
+                "Mình có thể chốt luôn 1-2 lựa chọn cùng gu để bạn dễ chọn.",
+            )
+            return f"{answer} {followups[style_idx]}"
+
+        return answer
 
     ranked = sorted(products, key=lambda product: _showcase_score(product, user_message), reverse=True)
     highlights = ranked[:4]
@@ -252,9 +430,10 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
     services.memory_agent.update_from_message(payload.session_id, payload.message)
     route = services.router_agent.route(payload.message)
 
-    products = []
+    products: list[Product] = []
     citations: list[CitationOut] = []
     fallback = False
+    recommendation_constraints: dict = {}
 
     if route.intent == "available_products":
         products = services.inventory_agent.list_available(db, limit=24)
@@ -289,6 +468,8 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
     elif route.intent == "recommendation":
         cache_key = f"chat:rec:v5:{normalize_text(payload.message)}"
         cached = semantic_cache.get(cache_key)
+        profile = services.memory_agent.get_profile(payload.session_id)
+        recommendation_constraints = services.recommendation_agent.parse_preferences(payload.message, profile)
 
         if cached:
             answer = cached["answer"]
@@ -296,8 +477,6 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
             products = [product for product in products if product is not None and product.stock > 0]
             citations = [CitationOut(**citation) for citation in cached["citations"]]
         else:
-            profile = services.memory_agent.get_profile(payload.session_id)
-            constraints = services.recommendation_agent.parse_preferences(payload.message, profile)
             products, reason = services.recommendation_agent.recommend(
                 db,
                 query=payload.message,
@@ -319,7 +498,7 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
                 answer = _build_recommendation_answer(
                     products=products,
                     reason=reason,
-                    constraints=constraints,
+                    constraints=recommendation_constraints,
                     rag_ranked=rag_ranked,
                 )
             else:
@@ -363,6 +542,9 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
             "Bạn có thể hỏi về sản phẩm, tồn kho, gợi ý theo vị, giao hàng hoặc đổi trả."
         )
 
+    rag_context = _build_rag_context_for_rewrite(citations=citations, products=products)
+    allow_follow_up = route.intent not in {"inventory_check"}
+
     try:
         answer, rewrite_mode = services.response_rewriter.rewrite(
             base_answer=answer,
@@ -370,10 +552,21 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
             intent=route.intent,
             session_id=payload.session_id,
             language=payload.language,
-            allow_follow_up=True,
+            allow_follow_up=allow_follow_up,
+            rag_context=rag_context,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    answer, products, repaired = _validate_and_repair_answer(
+        intent=route.intent,
+        user_message=payload.message,
+        answer=answer,
+        products=products,
+        constraints=recommendation_constraints,
+    )
+    if repaired:
+        rewrite_mode = f"{rewrite_mode}_guard"
 
     quality_review = {}
     if settings.enable_answer_quality_review:

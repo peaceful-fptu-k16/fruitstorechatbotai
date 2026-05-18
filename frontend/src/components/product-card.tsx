@@ -1,6 +1,11 @@
 import type { Product } from "@/lib/api-client";
 
-type ProductCardProps = { product: Product };
+type ProductCardVariant = "default" | "requested" | "similar";
+
+type ProductCardProps = {
+  product: Product;
+  variant?: ProductCardVariant;
+};
 
 /* Map tên → emoji đại diện */
 const FRUIT_EMOJI_MAP: [string, string][] = [
@@ -63,12 +68,33 @@ function AttributeBar({
   );
 }
 
-export function ProductCard({ product }: ProductCardProps) {
+export function ProductCard({ product, variant = "default" }: ProductCardProps) {
   const emoji   = getFruitEmoji(product.name);
   const inStock = product.stock > 0;
 
+  const recommendationBadge =
+    variant === "requested"
+      ? {
+          text: "Ưu tiên đúng loại",
+          cls: "border border-accent/25 bg-white/90 text-accent",
+        }
+      : variant === "similar"
+        ? {
+            text: "Gần giống khẩu vị",
+            cls: "border border-sky-200 bg-sky-50 text-sky-700",
+          }
+        : null;
+
   return (
-    <article className="product-card overflow-hidden rounded-2xl border border-accent/12 bg-white shadow-card">
+    <article
+      className={`product-card overflow-hidden rounded-2xl border border-accent/12 bg-white shadow-card ${
+        variant === "requested"
+          ? "ring-1 ring-accent/30"
+          : variant === "similar"
+            ? "ring-1 ring-sky-200/80"
+            : ""
+      }`}
+    >
       {/* Gradient header strip */}
       <div className="relative h-18 bg-gradient-to-br from-mellow via-accent-light to-mellow px-4 py-3">
         {/* Large fruit emoji */}
@@ -78,6 +104,11 @@ export function ProductCard({ product }: ProductCardProps) {
         <div className="pr-14">
           <h3 className="font-bold leading-tight text-ink">{product.name}</h3>
           <p className="text-xs text-ink/50">{product.origin} · {product.season}</p>
+          {recommendationBadge && (
+            <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${recommendationBadge.cls}`}>
+              {recommendationBadge.text}
+            </span>
+          )}
         </div>
       </div>
 

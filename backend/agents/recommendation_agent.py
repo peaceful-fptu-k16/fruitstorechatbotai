@@ -12,26 +12,126 @@ from backend.database.models import Product
 from backend.rag.embeddings import SentenceTransformerEmbeddingModel
 
 
+FRUIT_ENTITY_ALIASES: tuple[str, ...] = (
+    "thanh long",
+    "viet quat",
+    "xoai",
+    "cam",
+    "nho",
+    "buoi",
+    "tao",
+    "dua",
+    "chuoi",
+    "oi",
+    "kiwi",
+    "le",
+    "man",
+    "dau",
+)
+
+
 class RecommendationAgent:
     @staticmethod
     def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
         return any(keyword in text for keyword in keywords)
 
-    def _extract_budget(self, normalized_query: str) -> Optional[int]:
-        matches = re.findall(r"(\d+)\s*(k|nghin|ngan|trieu)?", normalized_query)
-        for number_text, suffix in matches:
-            value = int(number_text)
-            if suffix in {"k", "nghin", "ngan"}:
-                value *= 1000
-            elif suffix == "trieu":
-                value *= 1_000_000
+    @staticmethod
+    def _parse_money_value(number_text: str, suffix: Optional[str]) -> Optional[int]:
+        normalized_number = number_text.replace(",", ".").strip()
+        try:
+            value = float(normalized_number)
+        except Exception:
+            return None
 
-            if value >= 1000:
-                return value
-        return None
+        if suffix in {"k", "nghin", "ngan"}:
+            value *= 1000.0
+        elif suffix == "trieu":
+            value *= 1_000_000.0
+
+        if value < 1000:
+            return None
+        return int(value)
+
+    def _extract_budget_bounds(self, normalized_query: str) -> tuple[Optional[int], Optional[int]]:
+        range_patterns = (
+            r"(?:tu|khoang)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?\s*(?:den|toi|-)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?",
+            r"(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?\s*-\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?",
+        )
+
+        for pattern in range_patterns:
+            match = re.search(pattern, normalized_query)
+            if not match:
+                continue
+
+            left = self._parse_money_value(match.group(1), match.group(2))
+            right = self._parse_money_value(match.group(3), match.group(4))
+            if left is None or right is None:
+                continue
+
+            return (left, right) if left <= right else (right, left)
+
+        min_price: Optional[int] = None
+        max_price: Optional[int] = None
+
+        max_patterns = (
+            r"(?:duoi|toi da|khong qua|khong vuot qua|khong hon)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?",
+            r"(?:gia|ngan sach)\s*(?:duoi|toi da)?\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?",
+        )
+        for pattern in max_patterns:
+            match = re.search(pattern, normalized_query)
+            if not match:
+                continue
+            parsed = self._parse_money_value(match.group(1), match.group(2))
+            if parsed is not None:
+                max_price = parsed
+                break
+
+        min_patterns = (
+            r"(?:tren|tu|it nhat|toi thieu|hon)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?",
+        )
+        for pattern in min_patterns:
+            match = re.search(pattern, normalized_query)
+            if not match:
+                continue
+            parsed = self._parse_money_value(match.group(1), match.group(2))
+            if parsed is not None:
+                min_price = parsed
+                break
+
+        if min_price is None and max_price is None:
+            generic_matches = re.findall(r"(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)", normalized_query)
+            if generic_matches:
+                fallback_value = self._parse_money_value(generic_matches[0][0], generic_matches[0][1])
+                if fallback_value is not None:
+                    if any(token in normalized_query for token in ("tren", "tu", "it nhat", "toi thieu", "hon")):
+                        min_price = fallback_value
+                    else:
+                        max_price = fallback_value
+
+        if min_price is not None and max_price is not None and min_price > max_price:
+            min_price, max_price = max_price, min_price
+
+        return min_price, max_price
+
+    def _extract_requested_entities(self, normalized_query: str) -> list[str]:
+        requested: list[str] = []
+        seen: set[str] = set()
+
+        for alias in sorted(FRUIT_ENTITY_ALIASES, key=len, reverse=True):
+            pattern = rf"(?<!\w){re.escape(alias)}(?!\w)"
+            if re.search(pattern, normalized_query) is None:
+                continue
+
+            if alias in seen:
+                continue
+            seen.add(alias)
+            requested.append(alias)
+
+        return requested
 
     def parse_preferences(self, query: str, profile: PreferenceProfile) -> dict:
         normalized = normalize_text(query)
+        requested_entities = self._extract_requested_entities(normalized)
 
         explicit_low_sweet = self._contains_any(
             normalized,
@@ -163,7 +263,7 @@ class RecommendationAgent:
             "preferred_use": preferred_use,
         }
 
-        budget = self._extract_budget(normalized)
+        min_price, max_price = self._extract_budget_bounds(normalized)
         wants_budget_carryover = self._contains_any(
             normalized,
             (
@@ -174,12 +274,20 @@ class RecommendationAgent:
                 "van tam gia do",
             ),
         )
-        if budget is not None:
-            constraints["budget"] = budget
+        if max_price is not None or min_price is not None:
+            constraints["min_price"] = min_price
+            constraints["max_price"] = max_price
+            constraints["budget"] = max_price
         elif wants_budget_carryover:
+            constraints["min_price"] = None
+            constraints["max_price"] = profile.budget_hint
             constraints["budget"] = profile.budget_hint
         else:
+            constraints["min_price"] = None
+            constraints["max_price"] = None
             constraints["budget"] = None
+
+        constraints["requested_entities"] = requested_entities
         return constraints
 
     def _parse_preferences(self, query: str, profile: PreferenceProfile) -> dict:
@@ -273,6 +381,87 @@ class RecommendationAgent:
 
         return float(product.sweetness_level - product.sourness_level)
 
+    @staticmethod
+    def _product_matches_requested_entities(product: Product, requested_entities: list[str]) -> bool:
+        normalized_name = normalize_text(product.name)
+        return any(entity in normalized_name for entity in requested_entities)
+
+    @staticmethod
+    def _product_similarity_score(anchor: Product, candidate: Product) -> float:
+        feature_pairs = (
+            (anchor.sweetness_level, candidate.sweetness_level),
+            (anchor.sourness_level, candidate.sourness_level),
+            (anchor.juiciness_level, candidate.juiciness_level),
+            (anchor.aroma_level, candidate.aroma_level),
+            (anchor.crunchiness_level, candidate.crunchiness_level),
+            (anchor.fiber_level, candidate.fiber_level),
+            (anchor.vitamin_c_level, candidate.vitamin_c_level),
+            (anchor.sugar_content_level, candidate.sugar_content_level),
+        )
+
+        distance = sum(abs(float(left) - float(right)) / 10.0 for left, right in feature_pairs)
+        similarity = 1.0 - (distance / float(len(feature_pairs)))
+
+        if normalize_text(anchor.texture) == normalize_text(candidate.texture):
+            similarity += 0.07
+        if normalize_text(anchor.best_use) == normalize_text(candidate.best_use):
+            similarity += 0.06
+
+        return max(0.0, min(1.0, similarity))
+
+    def _prioritize_requested_then_similar(
+        self,
+        *,
+        ranked_products: list[Product],
+        requested_entities: list[str],
+        constraints: dict,
+        budget: Optional[int],
+        limit: int,
+    ) -> tuple[list[Product], bool, bool]:
+        if not ranked_products:
+            return [], False, False
+
+        if not requested_entities:
+            return ranked_products[:limit], False, False
+
+        requested_matches = [
+            product
+            for product in ranked_products
+            if self._product_matches_requested_entities(product, requested_entities)
+        ]
+        if not requested_matches:
+            return ranked_products[:limit], False, False
+
+        prioritized = requested_matches[:limit]
+        remaining_slots = limit - len(prioritized)
+        if remaining_slots <= 0:
+            return prioritized, True, False
+
+        prioritized_ids = {product.id for product in prioritized}
+        non_requested_candidates = [
+            product
+            for product in ranked_products
+            if product.id not in prioritized_ids
+            and not self._product_matches_requested_entities(product, requested_entities)
+        ]
+        if not non_requested_candidates:
+            return prioritized, True, False
+
+        anchors = prioritized[: min(len(prioritized), 2)]
+        similar_candidates = sorted(
+            non_requested_candidates,
+            key=lambda product: (
+                max(self._product_similarity_score(anchor, product) for anchor in anchors),
+                self._preference_score(product, constraints=constraints, budget=budget),
+                self._tie_breaker_score(product, constraints=constraints),
+                -product.price,
+            ),
+            reverse=True,
+        )
+
+        extras = similar_candidates[:remaining_slots]
+        return prioritized + extras, True, bool(extras)
+
     def _rank_with_deep_learning(
         self,
         retriever: Any,
@@ -325,7 +514,16 @@ class RecommendationAgent:
         )
         return ranked
 
-    def _build_reason(self, *, constraints: dict, used_deep_learning: bool, fallback_note: Optional[str] = None) -> str:
+    def _build_reason(
+        self,
+        *,
+        constraints: dict,
+        used_deep_learning: bool,
+        fallback_note: Optional[str] = None,
+        requested_entity_matched: bool = False,
+        added_similar_products: bool = False,
+        missing_requested_entities: bool = False,
+    ) -> str:
         traits: list[str] = []
         if constraints.get("min_sweetness") is not None:
             traits.append("độ ngọt cao")
@@ -349,8 +547,21 @@ class RecommendationAgent:
             traits.append("giàu vitamin C")
         if constraints.get("max_sugar") is not None:
             traits.append("đường tự nhiên thấp")
-        if constraints.get("budget") is not None:
-            traits.append(f"ngân sách dưới {int(constraints['budget']):,}đ".replace(",", "."))
+
+        min_price = constraints.get("min_price")
+        max_price = constraints.get("max_price")
+        if min_price is not None and max_price is not None:
+            traits.append(
+                f"ngân sách từ {int(min_price):,}đ đến {int(max_price):,}đ".replace(",", ".")
+            )
+        elif min_price is not None:
+            traits.append(f"ngân sách từ {int(min_price):,}đ trở lên".replace(",", "."))
+        elif max_price is not None:
+            traits.append(f"ngân sách dưới {int(max_price):,}đ".replace(",", "."))
+
+        requested_entities: list[str] = constraints.get("requested_entities") or []
+        if requested_entities and requested_entity_matched:
+            traits.append(f"đúng loại bạn cần ({', '.join(requested_entities)})")
 
         if traits:
             reason = f"Tiêu chí xếp hạng chính: {', '.join(traits)}."
@@ -364,6 +575,16 @@ class RecommendationAgent:
 
         if fallback_note:
             reason += f" {fallback_note}"
+
+        if requested_entity_matched:
+            reason += " Mình ưu tiên xếp đúng loại quả bạn hỏi lên đầu danh sách."
+        if added_similar_products:
+            reason += " Sau đó mình thêm vài loại có thuộc tính gần giống để bạn dễ so sánh."
+        elif missing_requested_entities and requested_entities:
+            readable_entities = ", ".join(requested_entities)
+            reason += (
+                f" Hiện chưa có đúng loại ({readable_entities}), nên mình gợi ý các loại có thuộc tính gần giống."
+            )
 
         return reason
 
@@ -379,7 +600,11 @@ class RecommendationAgent:
         use_deep_learning: bool = True,
     ) -> tuple[list[Product], str]:
         constraints = self._parse_preferences(query, profile)
-        budget = explicit_budget or constraints["budget"]
+        min_price = constraints.get("min_price")
+        max_price = explicit_budget if explicit_budget is not None else constraints.get("max_price")
+        constraints["max_price"] = max_price
+        constraints["budget"] = max_price
+        budget = max_price
 
         candidate_limit = max(limit * 10, 40)
         statement = select(Product).where(Product.stock > 0)
@@ -410,8 +635,10 @@ class RecommendationAgent:
             statement = statement.where(Product.calories_per_100g <= constraints["max_calories"])
         if constraints["preferred_texture"] is not None:
             statement = statement.where(Product.texture.ilike(f"%{constraints['preferred_texture']}%"))
-        if budget is not None:
-            statement = statement.where(Product.price <= budget)
+        if min_price is not None:
+            statement = statement.where(Product.price >= min_price)
+        if max_price is not None:
+            statement = statement.where(Product.price <= max_price)
 
         if constraints["min_sourness"] is not None:
             statement = statement.order_by(
@@ -447,7 +674,9 @@ class RecommendationAgent:
         statement = statement.limit(candidate_limit)
 
         products = list(db.scalars(statement))
+
         deep_learning_fallback_note = ""
+        requested_entities: list[str] = constraints.get("requested_entities") or []
 
         if products and use_deep_learning and retriever is not None:
             if self._supports_deep_learning(retriever):
@@ -459,8 +688,20 @@ class RecommendationAgent:
                     budget=budget,
                 )
                 if ranked_products:
-                    products = ranked_products[:limit]
-                    reason = self._build_reason(constraints=constraints, used_deep_learning=True)
+                    products, requested_entity_matched, added_similar_products = self._prioritize_requested_then_similar(
+                        ranked_products=ranked_products,
+                        requested_entities=requested_entities,
+                        constraints=constraints,
+                        budget=budget,
+                        limit=limit,
+                    )
+                    reason = self._build_reason(
+                        constraints=constraints,
+                        used_deep_learning=True,
+                        requested_entity_matched=requested_entity_matched,
+                        added_similar_products=added_similar_products,
+                        missing_requested_entities=bool(requested_entities and not requested_entity_matched),
+                    )
                     return products, reason
 
                 deep_learning_fallback_note = ""
@@ -468,14 +709,30 @@ class RecommendationAgent:
                 deep_learning_fallback_note = ""
 
         if not products:
-            reason = "Không tìm thấy sản phẩm khớp hoàn toàn với tiêu chí hiện tại của bạn."
+            if requested_entities:
+                readable_entities = ", ".join(requested_entities)
+                reason = (
+                    f"Mình chưa tìm thấy sản phẩm đúng loại bạn cần ({readable_entities}) "
+                    "và khớp tiêu chí hiện tại."
+                )
+            else:
+                reason = "Không tìm thấy sản phẩm khớp hoàn toàn với tiêu chí hiện tại của bạn."
             return [], reason
         else:
-            products = products[:limit]
+            products, requested_entity_matched, added_similar_products = self._prioritize_requested_then_similar(
+                ranked_products=products,
+                requested_entities=requested_entities,
+                constraints=constraints,
+                budget=budget,
+                limit=limit,
+            )
             reason = self._build_reason(
                 constraints=constraints,
                 used_deep_learning=False,
                 fallback_note=deep_learning_fallback_note or None,
+                requested_entity_matched=requested_entity_matched,
+                added_similar_products=added_similar_products,
+                missing_requested_entities=bool(requested_entities and not requested_entity_matched),
             )
 
         return products, reason

@@ -178,17 +178,21 @@ Primary environment variables (`.env.example`):
 | `USE_PRETRAINED_RERANKER` | `true` | cross-encoder reranker toggle |
 | `PRETRAINED_RERANKER_MODEL_NAME` | `BAAI/bge-reranker-v2-m3` | reranker model |
 | `RERANKER_CANDIDATE_POOL` | `30` | candidates before rerank |
-| `RESPONSE_GENERATION_MODE` | `llm_only` | response mode: `llm_only`, `hybrid`, or `deterministic` |
-| `ENABLE_LLM_RESPONSE_REWRITE` | `true` | enable Gemini response generation/rewrite |
-| `GEMINI_API_KEY` | `` | Gemini API key (required for `llm_only`) |
+| `RESPONSE_GENERATION_MODE` | `lm_studio` | response mode: `lm_studio`, `llm_only`, `hybrid`, or `deterministic` |
+| `ENABLE_LLM_RESPONSE_REWRITE` | `true` | enable LLM response generation/rewrite |
+| `GEMINI_API_KEY` | `` | optional Gemini API key (used by `hybrid`/`llm_only` fallback and quality review) |
 | `GEMINI_MODEL_NAME` | `gemini-1.5-flash` | Gemini model for response generation |
 | `GEMINI_TIMEOUT_SECONDS` | `6.0` | timeout for Gemini calls |
 | `GEMINI_TEMPERATURE` | `0.2` | low temperature for stable Gemini outputs |
+| `LM_STUDIO_BASE_URL` | `http://localhost:1234/v1` | LM Studio OpenAI-compatible endpoint |
+| `LM_STUDIO_MODEL_NAME` | `` | optional explicit model name for LM Studio strict provider selection |
+| `LM_STUDIO_TIMEOUT_SECONDS` | `15.0` | timeout for LM Studio calls |
+| `LM_STUDIO_TEMPERATURE` | `0.2` | low temperature for stable LM Studio outputs |
 | `ENABLE_USER_QUERY_LOGGING` | `true` | write user queries to log |
 | `USER_QUERY_LOG_PATH` | `ai_log/user_questions.jsonl` | query log file path |
 | `ENABLE_QA_PAIR_LOGGING` | `true` | log each question-answer pair |
 | `QA_PAIR_LOG_PATH` | `ai_log/qa_pairs.jsonl` | question-answer log file path |
-| `ENABLE_ANSWER_QUALITY_REVIEW` | `true` | let Gemini self-review each answer quality |
+| `ENABLE_ANSWER_QUALITY_REVIEW` | `true` | let Gemini self-review each answer quality (when `GEMINI_API_KEY` is set) |
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | frontend API base URL |
 
 ## 10. Model Strategy and Fallbacks
@@ -204,23 +208,27 @@ Fallback guarantees:
 - if semantic routing is unavailable -> keyword rules are used.
 
 Response generation strategy:
-- `llm_only`: Gemini must generate the final answer; no deterministic fallback is used.
-- `hybrid`: deterministic draft + Gemini rewrite when available.
+- `lm_studio`: LM Studio generates/rewrites final answer using grounded RAG context; returns 503 if unavailable.
+- `llm_only`: strict external LLM mode (no deterministic fallback), prefers LM Studio when `LM_STUDIO_MODEL_NAME` is configured, then Gemini.
+- `hybrid`: deterministic draft + LLM rewrite when available (Gemini first, LM Studio fallback).
 - `deterministic`: no external LLM call.
 
-For strict LLM behavior (no fallback), keep `RESPONSE_GENERATION_MODE=llm_only` and provide `GEMINI_API_KEY`.
+Grounding behavior:
+- chat/recommend rewrite prompts now include compact RAG evidence (citations + product facts) to reduce hallucination risk when using LM.
+
+For strict LM Studio behavior, set `RESPONSE_GENERATION_MODE=lm_studio`.
 
 Answer quality self-review:
 - Each Q/A pair can be logged to `ai_log/qa_pairs.jsonl`.
-- Gemini can score and comment on each answer (strengths/issues/lessons) for iterative improvement.
+- Gemini can score and comment on each answer (strengths/issues/lessons) for iterative improvement when key is provided.
 
-Gemini quick setup:
+LM Studio quick setup:
 
 ```powershell
 $env:ENABLE_LLM_RESPONSE_REWRITE='true'
-$env:RESPONSE_GENERATION_MODE='llm_only'
-$env:GEMINI_API_KEY='your_real_key_here'
-$env:GEMINI_MODEL_NAME='gemini-1.5-flash'
+$env:RESPONSE_GENERATION_MODE='lm_studio'
+$env:LM_STUDIO_BASE_URL='http://localhost:1234/v1'
+$env:LM_STUDIO_MODEL_NAME='your-loaded-model-name'
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -294,6 +302,8 @@ Supported stock operations:
 	- format: one JSON object per line (timestamp, source, session_id, user_id, question, metadata)
 - AI operation history:
 	- file: `ai_log/ai_usage_log.md`
+- QA KPI report (entity hit, budget pass, route accuracy, extraneous suggestion):
+	- command: `python -m backend.evaluation.qa_kpi_report --path ai_log/qa_pairs.jsonl`
 
 ## 13. Testing
 

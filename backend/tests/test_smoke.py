@@ -46,6 +46,25 @@ def test_chat_available_products_tracks_requested_fruit_context() -> None:
     assert ("giá" in payload["answer"]) or ("còn" in payload["answer"])
 
 
+def test_chat_recommendation_respects_requested_entity() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/chat",
+            json={
+                "user_id": "tester",
+                "session_id": "session-cam-1",
+                "message": "Tôi muốn mua cam",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "recommendation"
+    assert "cam" in payload["answer"].lower()
+    assert payload["products"]
+    assert "cam" in payload["products"][0]["name"].lower()
+
+
 def test_admin_update_stock_idempotent() -> None:
     with TestClient(app) as client:
         login = client.post(
