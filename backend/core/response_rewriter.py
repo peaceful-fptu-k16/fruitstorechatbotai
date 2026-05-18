@@ -79,6 +79,10 @@ class ResponseRewriter:
         gemini_model_name: str = "gemini-1.5-flash",
         gemini_timeout_seconds: float = 6.0,
         gemini_temperature: float = 0.2,
+        lm_studio_base_url: str = "http://localhost:1234/v1",
+        lm_studio_model_name: str = "",
+        lm_studio_timeout_seconds: float = 15.0,
+        lm_studio_temperature: float = 0.2,
     ) -> None:
         self.generation_mode = generation_mode.strip().lower()
         self.llm_enabled = llm_enabled
@@ -86,6 +90,10 @@ class ResponseRewriter:
         self.gemini_model_name = gemini_model_name
         self.gemini_timeout_seconds = gemini_timeout_seconds
         self.gemini_temperature = gemini_temperature
+        self.lm_studio_base_url = lm_studio_base_url.rstrip("/")
+        self.lm_studio_model_name = lm_studio_model_name.strip()
+        self.lm_studio_timeout_seconds = lm_studio_timeout_seconds
+        self.lm_studio_temperature = lm_studio_temperature
 
     def rewrite(
         self,
@@ -110,6 +118,23 @@ class ResponseRewriter:
                 allow_follow_up=allow_follow_up,
             )
             return deterministic_answer, "deterministic"
+
+        if self.generation_mode == "lm_studio":
+            if not self._can_use_lm_studio():
+                raise RuntimeError(
+                    "Chế độ lm_studio đang bật nhưng LM Studio chưa sẵn sàng. "
+                    "Hãy kiểm tra LM_STUDIO_MODEL_NAME và server đang chạy tại LM_STUDIO_BASE_URL."
+                )
+            lm_answer = self._rewrite_with_lm_studio(
+                base_answer=cleaned,
+                user_message=user_message,
+                intent=intent,
+                session_id=session_id,
+                allow_follow_up=allow_follow_up,
+            )
+            if not lm_answer:
+                raise RuntimeError("LM Studio không trả về nội dung hợp lệ.")
+            return lm_answer, "lm_studio"
 
         if self.generation_mode == "llm_only":
             if not self._can_use_gemini() or not language.lower().startswith("vi"):
@@ -234,6 +259,109 @@ class ResponseRewriter:
 
     def _can_use_gemini(self) -> bool:
         return self.llm_enabled and bool(self.gemini_api_key)
+
+    def _can_use_lm_studio(self) -> bool:
+        return self.llm_enabled
+
+    def _call_lm_studio(self, *, prompt: str) -> Optional[str]:
+        if not self._can_use_lm_studio():
+            return None
+
+        payload: dict = {
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": self.lm_studio_temperature,
+            "thinking": {"type": "disabled"},
+        }
+        if self.lm_studio_model_name:
+            payload["model"] = self.lm_studio_model_name
+        url = f"{self.lm_studio_base_url}/chat/completions"
+
+        try:
+            with httpx.Client(timeout=self.lm_studio_timeout_seconds) as client:
+                response = client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+            message = data["choices"][0]["message"]
+            text = (message.get("content") or "").strip()
+            if not text:
+                text = self._extract_from_reasoning(message.get("reasoning_content") or "")
+            text = text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
+            return text if text else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_from_reasoning(reasoning: str) -> str:
+        if not reasoning:
+            return ""
+
+        separators = [
+            # Vietnamese
+            "---", "Kết luận", "Kết Luận", "KẾT LUẬN", "## Kết", "**Kết",
+            # English (reasoning models often conclude in English)
+            "Final answer", "Final Answer", "FINAL ANSWER",
+            "In conclusion", "In summary", "Therefore,", "So,",
+            "The answer is", "My response:", "Response:",
+        ]
+        last_pos = -1
+        last_sep = ""
+        for sep in separators:
+            pos = reasoning.rfind(sep)
+            if pos > last_pos:
+                last_pos = pos
+                last_sep = sep
+
+        if last_pos != -1:
+            after = reasoning[last_pos + len(last_sep):].strip().lstrip(":").strip()
+            if after:
+                for line in after.splitlines():
+                    line = line.strip().lstrip("#").lstrip("*").strip()
+                    if line and len(line) > 5:
+                        return line
+
+        # Fallback: lấy dòng cuối cùng có nội dung
+        for line in reversed(reasoning.splitlines()):
+            line = line.strip().lstrip("#").lstrip("*").strip()
+            if line and len(line) > 5:
+                return line
+
+        return ""
+
+    def _rewrite_with_lm_studio(
+        self,
+        *,
+        base_answer: str,
+        user_message: str,
+        intent: str,
+        session_id: str,
+        allow_follow_up: bool,
+    ) -> Optional[str]:
+        style_idx = self._style_index(user_message=user_message, intent=intent, session_id=session_id)
+        tone = _STYLE_VARIANTS[style_idx]["tone"]
+
+        follow_up_rule = (
+            "Có thể kết câu bằng 1 câu gợi mở ngắn."
+            if allow_follow_up
+            else "Không thêm câu hỏi gợi mở ở cuối."
+        )
+
+        prompt = (
+            "Bạn là trợ lý tư vấn trái cây. Hãy viết lại câu trả lời tiếng Việt cho tự nhiên hơn, "
+            "nhưng phải giữ nguyên dữ kiện thực tế (tên sản phẩm, giá, số lượng, mức độ). "
+            "Không bịa thông tin mới, không đổi nghĩa, không dùng markdown. "
+            f"Giữ giọng điệu: {tone}. {follow_up_rule} "
+            "Loại bỏ câu lặp hoặc ý lặp, tối đa 3 câu, rõ ràng.\n\n"
+            f"Intent: {intent}\n"
+            f"Câu hỏi người dùng: {user_message}\n"
+            f"Bản nháp hiện tại: {base_answer}\n\n"
+            "Trả về duy nhất câu trả lời đã viết lại."
+        )
+
+        generated = self._call_lm_studio(prompt=prompt)
+        if not generated:
+            return None
+        generated = re.sub(r"[#*`]+", "", generated)
+        return _clean_text(generated)
 
     def _style_index(self, *, user_message: str, intent: str, session_id: str) -> int:
         seed = f"{session_id}|{intent}|{normalize_text(user_message)}"
