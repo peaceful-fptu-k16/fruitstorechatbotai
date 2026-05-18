@@ -50,5 +50,9 @@ class ServiceFactory:
                 gemini_model_name=settings.gemini_model_name,
                 gemini_timeout_seconds=settings.gemini_timeout_seconds,
                 gemini_temperature=settings.gemini_temperature,
+                lm_studio_base_url=settings.lm_studio_base_url,
+                lm_studio_model_name=settings.lm_studio_model_name,
+                lm_studio_timeout_seconds=settings.lm_studio_timeout_seconds,
+                lm_studio_temperature=settings.lm_studio_temperature,
             ),
         )
