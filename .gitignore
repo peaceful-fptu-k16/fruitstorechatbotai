@@ -18,6 +18,10 @@ out/
 
 # Runtime logs
 ai_log/user_questions.jsonl
+ai_log/*.log
+
+# Local tools
+tools/ngrok/
 
 # OS
 .DS_Store

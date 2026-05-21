@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from backend.api.mappers import to_product_out
 from backend.core.cache import semantic_cache
 from backend.core.config import get_settings
+from backend.core.services import sync_services_with_inventory
 from backend.core.text import normalize_text
 from backend.database.models import Product
 from backend.database.session import get_db
@@ -71,6 +72,7 @@ def recommend_products(
     db: Session = Depends(get_db),
 ) -> RecommendResponse:
     services = request.app.state.services
+    sync_services_with_inventory(db, services)
 
     log_user_question(
         source="/recommend",

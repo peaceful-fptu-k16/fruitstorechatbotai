@@ -3,7 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 from typing import Iterable, Optional
 
-from sqlalchemy import Select, select, text
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.orm import Session
 
 from backend.core.text import normalize_text
@@ -476,6 +476,45 @@ def get_product_by_id(db: Session, product_id: int) -> Optional[Product]:
     return db.get(Product, product_id)
 
 
+def update_product_profile(
+    db: Session,
+    *,
+    actor: str,
+    product_id: int,
+    updates: dict,
+) -> tuple[Product, list[str]]:
+    product = get_product_by_id(db, product_id)
+    if product is None:
+        raise ValueError(f"Product id={product_id} not found")
+
+    changed_fields: list[str] = []
+    for field_name, value in updates.items():
+        if value is None:
+            continue
+
+        normalized_value = value.strip() if isinstance(value, str) else value
+        if getattr(product, field_name) == normalized_value:
+            continue
+
+        setattr(product, field_name, normalized_value)
+        changed_fields.append(field_name)
+
+    if changed_fields:
+        db.add(
+            InventoryEvent(
+                product_id=product.id,
+                actor=actor,
+                operation="product_update",
+                quantity_delta=0,
+                new_stock=product.stock,
+            )
+        )
+        db.commit()
+        db.refresh(product)
+
+    return product, changed_fields
+
+
 def find_products_by_name(db: Session, name: str, limit: int = 5) -> list[Product]:
     statement = (
         select(Product)
@@ -488,6 +527,24 @@ def find_products_by_name(db: Session, name: str, limit: int = 5) -> list[Produc
 
 def list_faq_documents(db: Session) -> list[FaqDocument]:
     return list(db.scalars(select(FaqDocument)))
+
+
+def get_latest_inventory_event_id(db: Session) -> int:
+    latest_id = db.scalar(select(func.max(InventoryEvent.id)))
+    return int(latest_id or 0)
+
+
+def list_inventory_events(
+    db: Session,
+    *,
+    product_id: Optional[int] = None,
+    limit: int = 50,
+) -> list[InventoryEvent]:
+    statement = select(InventoryEvent).order_by(InventoryEvent.created_at.desc(), InventoryEvent.id.desc())
+    if product_id is not None:
+        statement = statement.where(InventoryEvent.product_id == product_id)
+    statement = statement.limit(limit)
+    return list(db.scalars(statement))
 
 
 def get_or_create_conversation(db: Session, session_id: str, user_id: str) -> Conversation:

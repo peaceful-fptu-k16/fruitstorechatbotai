@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from backend.api.mappers import to_product_out
 from backend.core.cache import semantic_cache
 from backend.core.config import get_settings
+from backend.core.services import sync_services_with_inventory
 from backend.core.text import normalize_text
 from backend.database.models import Product
 from backend.database.queries import save_message
@@ -414,13 +415,19 @@ def _build_available_products_answer(
     )
 
 
-@router.post("/chat", response_model=ChatResponse)
-def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) -> ChatResponse:
-    services = request.app.state.services
+def handle_chat_request(
+    payload: ChatRequest,
+    *,
+    app_state: object,
+    db: Session,
+    source: str = "/chat",
+) -> ChatResponse:
+    services = app_state.services
+    sync_services_with_inventory(db, services)
     trace_id = str(uuid4())
 
     log_user_question(
-        source="/chat",
+        source=source,
         question=payload.message,
         user_id=payload.user_id,
         session_id=payload.session_id,
@@ -577,7 +584,7 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
         )
 
     log_qa_pair(
-        source="/chat",
+        source=source,
         question=payload.message,
         answer=answer,
         user_id=payload.user_id,
@@ -620,3 +627,8 @@ def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) 
         citations=citations,
         fallback=fallback,
     )
+
+
+@router.post("/chat", response_model=ChatResponse)
+def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) -> ChatResponse:
+    return handle_chat_request(payload, app_state=request.app.state, db=db)

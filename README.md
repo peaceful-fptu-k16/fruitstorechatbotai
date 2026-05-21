@@ -1,6 +1,6 @@
 # FruitStoreChatbotAI
 
-Production-style multi-agent RAG chatbot for a fruit store, built with FastAPI + Next.js.
+Production-style multi-agent RAG chatbot for a fruit store, built with split FastAPI services and an optional Next.js chat demo.
 
 The system combines deterministic business logic and pretrained semantic models to provide:
 - natural product consultation,
@@ -24,6 +24,8 @@ The system combines deterministic business logic and pretrained semantic models 
 - Operational safety:
 	- idempotent admin stock updates
 	- in-memory rate limiting
+	- split admin and Messenger chatbot services
+	- Facebook webhook verification and Send API replies
 	- model fallback strategy for stable runtime
 	- automatic user question logging
 
@@ -36,6 +38,11 @@ Runtime request flow (chat/recommend):
 4. For recommendation/FAQ intents, retriever performs semantic search (and reranking if enabled).
 5. RecommendationAgent blends semantic relevance with preference constraints.
 6. Response is returned with optional product citations.
+
+Split-service layout:
+1. `admin-service` serves the admin web UI plus `/admin/*`, `/products`, and `/inventory`.
+2. `chatbot-service` serves `/webhooks/facebook`, `/chat`, `/recommend`, `/products`, and `/inventory`.
+3. Both services share the same database. The chatbot service watches `inventory_events` and refreshes its local semantic index/cache when admin stock updates occur.
 
 Startup flow:
 1. Create database tables.
@@ -113,21 +120,42 @@ python -m pip install --upgrade pip
 pip install -r backend/requirements.txt
 ```
 
-Run API:
+Run the admin service:
 
 ```bash
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn backend.admin_main:app --host 0.0.0.0 --port 8000
 ```
 
 Open:
-- API docs: http://localhost:8000/docs
-- Health: http://localhost:8000/health
+- Admin UI: http://localhost:8000/admin
+- Admin API docs: http://localhost:8000/docs
+- Admin health: http://localhost:8000/health
+
+Run the chatbot service in a second terminal:
+
+```bash
+python -m uvicorn backend.chatbot_main:app --host 0.0.0.0 --port 8001
+```
+
+Open:
+- Chatbot API docs: http://localhost:8001/docs
+- Facebook webhook URL: http://localhost:8001/webhooks/facebook
+- Chatbot health: http://localhost:8001/health
 
 ### 7.2 Frontend
+
+The Next.js app is now optional and remains useful as a local chat demo. Point it at the chatbot service:
 
 ```bash
 cd frontend
 npm install
+npm run dev
+```
+
+PowerShell override when needed:
+
+```powershell
+$env:NEXT_PUBLIC_API_BASE_URL='http://localhost:8001'
 npm run dev
 ```
 
@@ -143,7 +171,7 @@ $env:ALLOW_REMOTE_MODEL_DOWNLOAD='false'
 $env:EMBEDDING_BACKEND='hashing'
 $env:USE_PRETRAINED_INTENT_ROUTER='false'
 $env:USE_PRETRAINED_RERANKER='false'
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn backend.chatbot_main:app --host 0.0.0.0 --port 8001
 ```
 
 ## 8. Docker Setup
@@ -153,8 +181,20 @@ docker compose up --build
 ```
 
 Services:
-- Backend: http://localhost:8000
-- Frontend: http://localhost:3000
+- Admin service: http://localhost:8000/admin
+- Chatbot service: http://localhost:8001
+- Facebook webhook callback URL: http://localhost:8001/webhooks/facebook
+
+### 8.1 Facebook Messenger Setup
+
+1. Create or open a Meta app that has Messenger enabled and is connected to your Facebook Page.
+2. Set `.env` values:
+	- `FACEBOOK_VERIFY_TOKEN`: any secret string you also enter in Meta webhook settings.
+	- `FACEBOOK_PAGE_ACCESS_TOKEN`: Page access token with Messenger permissions.
+	- `FACEBOOK_PAGE_ID`: Page ID, or keep `me` if your token supports it.
+	- `FACEBOOK_APP_SECRET`: recommended for webhook signature verification.
+3. Expose `chatbot-service` over HTTPS for Meta, then configure callback URL `/webhooks/facebook`.
+4. Subscribe the Page to message events in the Meta app dashboard.
 
 ## 9. Configuration
 
@@ -193,7 +233,13 @@ Primary environment variables (`.env.example`):
 | `ENABLE_QA_PAIR_LOGGING` | `true` | log each question-answer pair |
 | `QA_PAIR_LOG_PATH` | `ai_log/qa_pairs.jsonl` | question-answer log file path |
 | `ENABLE_ANSWER_QUALITY_REVIEW` | `true` | let Gemini self-review each answer quality (when `GEMINI_API_KEY` is set) |
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | frontend API base URL |
+| `FACEBOOK_VERIFY_TOKEN` | `change-me-facebook-verify-token` | shared token used by Meta webhook verification |
+| `FACEBOOK_PAGE_ACCESS_TOKEN` | `` | Page access token used to send Messenger replies |
+| `FACEBOOK_PAGE_ID` | `me` | Page ID for the Graph API messages endpoint |
+| `FACEBOOK_APP_SECRET` | `` | optional app secret for `X-Hub-Signature-256` verification |
+| `FACEBOOK_GRAPH_API_VERSION` | `v22.0` | Graph API version used for Messenger Send API calls |
+| `FACEBOOK_REQUEST_TIMEOUT_SECONDS` | `8.0` | timeout for outbound Messenger Send API calls |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8001` | optional frontend chat demo API base URL |
 
 ## 10. Model Strategy and Fallbacks
 
@@ -229,13 +275,16 @@ $env:ENABLE_LLM_RESPONSE_REWRITE='true'
 $env:RESPONSE_GENERATION_MODE='lm_studio'
 $env:LM_STUDIO_BASE_URL='http://localhost:1234/v1'
 $env:LM_STUDIO_MODEL_NAME='your-loaded-model-name'
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn backend.chatbot_main:app --host 0.0.0.0 --port 8001
 ```
 
 ## 11. API Reference (Core)
 
 ### `GET /health`
 Returns service health.
+
+### `GET /admin`
+Admin web UI for login, product lookup, and stock updates. Served by `admin-service`.
 
 ### `POST /chat`
 Natural chat endpoint with intent routing.
@@ -294,6 +343,22 @@ Supported stock operations:
 - `inc`
 - `dec`
 
+#### `PATCH /admin/products/{product_id}`
+Update product profile fields such as name, price, taste scores, origin, season, best use, and description. Requires `Authorization: Bearer <token>`.
+
+#### `GET /admin/inventory-events`
+View recent stock/product update audit events. Requires `Authorization: Bearer <token>`. Optional query params:
+- `product_id`
+- `limit` (1-200)
+
+### Facebook Messenger endpoints
+
+#### `GET /webhooks/facebook`
+Meta webhook verification endpoint. It checks `hub.verify_token` against `FACEBOOK_VERIFY_TOKEN` and returns `hub.challenge`.
+
+#### `POST /webhooks/facebook`
+Messenger webhook receiver. It extracts incoming text messages, runs the chatbot pipeline, and replies through the Messenger Send API using `FACEBOOK_PAGE_ACCESS_TOKEN`.
+
 ## 12. Logging and Observability
 
 - User query logging:
@@ -330,7 +395,7 @@ Notes:
 	- expected on some setups; functionality still works.
 - Frontend cannot reach backend:
 	- check `NEXT_PUBLIC_API_BASE_URL`
-	- verify backend at `http://localhost:8000/health`.
+	- verify chatbot service at `http://localhost:8001/health`.
 - Database schema mismatch after adding new fields:
 	- app startup runs schema patching for product columns in SQLite,
 	- restart backend to trigger patch + reseed.

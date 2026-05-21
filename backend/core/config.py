@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     enable_qa_pair_logging: bool = True
     qa_pair_log_path: str = "ai_log/qa_pairs.jsonl"
     enable_answer_quality_review: bool = True
+    facebook_verify_token: str = ""
+    facebook_page_access_token: str = ""
+    facebook_page_id: str = "me"
+    facebook_app_secret: str = ""
+    facebook_graph_api_version: str = "v22.0"
+    facebook_request_timeout_seconds: float = 8.0
 
     model_config = SettingsConfigDict(
         env_file=".env",

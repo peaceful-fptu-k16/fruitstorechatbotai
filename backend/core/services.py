@@ -7,8 +7,10 @@ from backend.agents.inventory_agent import InventoryAgent
 from backend.agents.memory_agent import MemoryAgent
 from backend.agents.recommendation_agent import RecommendationAgent
 from backend.agents.router_agent import RouterAgent
+from backend.core.cache import semantic_cache
 from backend.core.config import get_settings
 from backend.core.response_rewriter import ResponseRewriter
+from backend.database.queries import get_latest_inventory_event_id
 from backend.rag.retriever import HybridRetriever
 
 
@@ -21,6 +23,7 @@ class ServiceContainer:
     memory_agent: MemoryAgent
     retriever: HybridRetriever
     response_rewriter: ResponseRewriter
+    inventory_revision: int = 0
 
 
 class ServiceFactory:
@@ -55,4 +58,16 @@ class ServiceFactory:
                 lm_studio_timeout_seconds=settings.lm_studio_timeout_seconds,
                 lm_studio_temperature=settings.lm_studio_temperature,
             ),
+            inventory_revision=get_latest_inventory_event_id(db),
         )
+
+
+def sync_services_with_inventory(db: Session, services: ServiceContainer) -> None:
+    latest_revision = get_latest_inventory_event_id(db)
+    if latest_revision <= services.inventory_revision:
+        return
+
+    services.retriever.rebuild_index(db)
+    semantic_cache.invalidate_prefix("chat:")
+    semantic_cache.invalidate_prefix("recommend:")
+    services.inventory_revision = latest_revision

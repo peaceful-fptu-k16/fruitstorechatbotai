@@ -43,6 +43,53 @@ class ProductOut(BaseModel):
     description: str
 
 
+class ProductUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    price: Optional[int] = Field(default=None, ge=0)
+    sweetness_level: Optional[int] = Field(default=None, ge=0, le=10)
+    sourness_level: Optional[int] = Field(default=None, ge=0, le=10)
+    seed_level: Optional[int] = Field(default=None, ge=0, le=10)
+    juiciness_level: Optional[int] = Field(default=None, ge=0, le=10)
+    aroma_level: Optional[int] = Field(default=None, ge=0, le=10)
+    crunchiness_level: Optional[int] = Field(default=None, ge=0, le=10)
+    fiber_level: Optional[int] = Field(default=None, ge=0, le=10)
+    vitamin_c_level: Optional[int] = Field(default=None, ge=0, le=10)
+    sugar_content_level: Optional[int] = Field(default=None, ge=0, le=10)
+    calories_per_100g: Optional[int] = Field(default=None, ge=0)
+    shelf_life_days: Optional[int] = Field(default=None, ge=0)
+    texture: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    color: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    best_use: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    origin: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    season: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    description: Optional[str] = Field(default=None, min_length=1)
+
+
+class ProductUpdateResponse(BaseModel):
+    status: str
+    product: ProductOut
+    changed_fields: list[str] = Field(default_factory=list)
+    actor: str
+    timestamp: datetime
+
+
+class InventoryEventOut(BaseModel):
+    id: int
+    product_id: int
+    product_name: str
+    actor: str
+    operation: str
+    quantity_delta: int
+    new_stock: int
+    created_at: datetime
+
+
+class InventoryEventsResponse(BaseModel):
+    total: int
+    items: list[InventoryEventOut]
+
+
 class ChatRequest(BaseModel):
     user_id: str = Field(default="guest")
     session_id: str = Field(default="default-session")
