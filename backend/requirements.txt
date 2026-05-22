@@ -6,7 +6,6 @@ pydantic-settings==2.10.1
 python-dotenv==1.1.1
 numpy==2.0.2
 sentence-transformers==3.0.1
-pytest==8.4.1
 httpx==0.28.1
 # Optional for production vector storage integration:
 # chromadb==0.5.7

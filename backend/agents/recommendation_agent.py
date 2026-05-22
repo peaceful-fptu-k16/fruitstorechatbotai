@@ -132,6 +132,15 @@ class RecommendationAgent:
     def parse_preferences(self, query: str, profile: PreferenceProfile) -> dict:
         normalized = normalize_text(query)
         requested_entities = self._extract_requested_entities(normalized)
+        is_child_context = self._contains_any(normalized, ("cho be", "tre em", "em be", "be an"))
+        is_elderly_context = self._contains_any(
+            normalized,
+            ("nguoi lon tuoi", "nguoi gia", "ong ba", "de nhai"),
+        )
+        is_comparison = self._contains_any(
+            normalized,
+            ("so sanh", "khac nhau", "nen chon", "loai nao", "hon"),
+        ) and len(requested_entities) >= 2
 
         explicit_low_sweet = self._contains_any(
             normalized,
@@ -202,6 +211,9 @@ class RecommendationAgent:
             min_sweetness = None
             max_sweetness = None
 
+        if is_child_context and min_sweetness is None and max_sweetness is None:
+            min_sweetness = 6
+
         if explicit_low_sour:
             max_sourness = 3
             min_sourness = None
@@ -218,9 +230,13 @@ class RecommendationAgent:
             max_sourness = None
             min_sourness = None
 
-        prefers_low_sugar = self._contains_any(normalized, ("it duong", "an kieng", "giam can", "keto")) or bool(
-            profile.prefers_low_sugar
-        )
+        if (is_child_context or is_elderly_context) and min_sourness is None and max_sourness is None:
+            max_sourness = 3
+
+        prefers_low_sugar = self._contains_any(
+            normalized,
+            ("it duong", "an kieng", "giam can", "keto", "tieu duong", "duong huyet"),
+        ) or bool(profile.prefers_low_sugar)
         prefers_high_fiber = self._contains_any(normalized, ("chat xo", "tieu hoa", "no lau")) or bool(
             profile.prefers_high_fiber
         )
@@ -231,7 +247,7 @@ class RecommendationAgent:
         preferred_texture = profile.preferred_texture
         if self._contains_any(normalized, ("gion", "gion rum", "do gion")):
             preferred_texture = "giòn"
-        elif self._contains_any(normalized, ("mem", "de an", "de nhai")):
+        elif self._contains_any(normalized, ("mem", "de an", "de nhai")) or is_elderly_context:
             preferred_texture = "mềm"
 
         preferred_use = None
@@ -247,7 +263,7 @@ class RecommendationAgent:
             "max_sweetness": max_sweetness,
             "min_sourness": min_sourness,
             "max_sourness": max_sourness,
-            "max_seed": 3 if ("it hat" in normalized or profile.prefers_low_seed) else None,
+            "max_seed": 3 if ("it hat" in normalized or profile.prefers_low_seed or is_child_context or is_elderly_context) else None,
             "min_juiciness": 7
             if (self._contains_any(normalized, ("mong nuoc", "nhieu nuoc", "giai nhiet", "ep nuoc")) or profile.prefers_juicy)
             else None,
@@ -261,6 +277,9 @@ class RecommendationAgent:
             "max_calories": 60 if prefers_low_sugar else None,
             "preferred_texture": preferred_texture,
             "preferred_use": preferred_use,
+            "is_child_context": is_child_context,
+            "is_elderly_context": is_elderly_context,
+            "is_comparison": is_comparison,
         }
 
         min_price, max_price = self._extract_budget_bounds(normalized)
@@ -547,6 +566,10 @@ class RecommendationAgent:
             traits.append("giàu vitamin C")
         if constraints.get("max_sugar") is not None:
             traits.append("đường tự nhiên thấp")
+        if constraints.get("is_child_context"):
+            traits.append("dễ ăn cho trẻ em")
+        if constraints.get("is_elderly_context"):
+            traits.append("dễ nhai cho người lớn tuổi")
 
         min_price = constraints.get("min_price")
         max_price = constraints.get("max_price")
@@ -677,6 +700,16 @@ class RecommendationAgent:
 
         deep_learning_fallback_note = ""
         requested_entities: list[str] = constraints.get("requested_entities") or []
+        if requested_entities and constraints.get("is_comparison"):
+            requested_pool = list(db.scalars(select(Product).where(Product.stock > 0).limit(200)))
+            requested_matches = [
+                product
+                for product in requested_pool
+                if self._product_matches_requested_entities(product, requested_entities)
+            ]
+            if requested_matches:
+                requested_ids = {product.id for product in requested_matches}
+                products = requested_matches + [product for product in products if product.id not in requested_ids]
 
         if products and use_deep_learning and retriever is not None:
             if self._supports_deep_learning(retriever):

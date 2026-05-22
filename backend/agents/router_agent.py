@@ -257,6 +257,14 @@ class PretrainedSemanticIntentBackend:
 
 
 class RouterAgent:
+    @staticmethod
+    def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+        return any(keyword in text for keyword in keywords)
+
+    @staticmethod
+    def _has_fruit_entity(text: str) -> bool:
+        return any(entity in text for entity in FRUIT_ENTITY_KEYWORDS)
+
     def __init__(
         self,
         *,
@@ -273,17 +281,28 @@ class RouterAgent:
         self.rules: tuple[Rule, ...] = (
             Rule(
                 intent="faq_shipping",
-                keywords=("ship", "giao", "delivery", "van chuyen", "bao lau"),
+                keywords=(
+                    "ship",
+                    "giao",
+                    "delivery",
+                    "van chuyen",
+                    "bao lau",
+                    "phi ship",
+                    "mien phi ship",
+                    "cod",
+                    "noi thanh",
+                    "ngoai thanh",
+                ),
                 confidence=0.93,
             ),
             Rule(
                 intent="faq_return",
-                keywords=("doi tra", "refund", "hoan tien", "bao hanh"),
+                keywords=("doi tra", "refund", "hoan tien", "bao hanh", "hang dap", "bi dap", "hang hong", "sai don"),
                 confidence=0.92,
             ),
             Rule(
                 intent="faq_storage",
-                keywords=("bao quan", "de tu lanh", "storage", "giu tuoi"),
+                keywords=("bao quan", "de tu lanh", "storage", "giu tuoi", "de ngoai", "nhiet do", "bao lau thi hong"),
                 confidence=0.92,
             ),
             Rule(
@@ -314,6 +333,20 @@ class RouterAgent:
                     "mong nuoc",
                     "gion",
                     "thom",
+                    "so sanh",
+                    "khac nhau",
+                    "nen chon",
+                    "loai nao",
+                    "cho be",
+                    "tre em",
+                    "nguoi lon tuoi",
+                    "nguoi gia",
+                    "tieu duong",
+                    "gia re",
+                    "tam gia",
+                    "duoi",
+                    "bieu",
+                    "qua tang",
                 ),
                 confidence=0.89,
             ),
@@ -433,6 +466,53 @@ class RouterAgent:
             return pretrained_result
 
         message = normalize_text(user_message)
+        has_fruit_entity = self._has_fruit_entity(message)
+
+        price_question_patterns = (
+            "gia bao nhieu",
+            "bao nhieu tien",
+            "bao nhieu",
+            "nhieu tien",
+            "may tien",
+            "gia cua",
+            "gia 1kg",
+            "bao nhieu 1kg",
+            "bao nhieu mot kg",
+        )
+        budget_filter_patterns = ("duoi", "tren", "ngan sach", "tam gia", "gia re", "khong qua", "toi da")
+        asks_product_price = self._contains_any(message, price_question_patterns) or (
+            "gia" in message and not self._contains_any(message, budget_filter_patterns)
+        )
+        if has_fruit_entity and asks_product_price:
+            return IntentResult(intent="inventory_check", confidence=0.86, reason="entity_price_heuristic")
+
+        comparison_patterns = ("so sanh", "khac nhau", "nen chon", "loai nao ngon hon", "loai nao hop hon")
+        if self._contains_any(message, comparison_patterns):
+            return IntentResult(intent="recommendation", confidence=0.86, reason="comparison_heuristic")
+
+        advisory_patterns = (
+            "goi y",
+            "tu van",
+            "nen mua",
+            "phu hop",
+            "duoi",
+            "tren",
+            "ngan sach",
+            "tam gia",
+            "gia re",
+            "it duong",
+            "an kieng",
+            "giam can",
+            "tieu duong",
+            "cho be",
+            "tre em",
+            "nguoi lon tuoi",
+            "nguoi gia",
+            "bieu",
+            "qua tang",
+        )
+        if self._contains_any(message, advisory_patterns):
+            return IntentResult(intent="recommendation", confidence=0.84, reason="advisory_heuristic")
 
         if any(
             phrase in message
@@ -443,6 +523,11 @@ class RouterAgent:
                 "cua hang co gi hom nay",
                 "co qua gi",
                 "co trai gi",
+                "dang co gi",
+                "menu",
+                "danh sach",
+                "con loai nao",
+                "dang ban gi",
             )
         ):
             return IntentResult(intent="available_products", confidence=0.78, reason="catalog_heuristic")

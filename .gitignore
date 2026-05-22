@@ -18,7 +18,9 @@ out/
 
 # Runtime logs
 ai_log/user_questions.jsonl
+ai_log/qa_pairs.jsonl
 ai_log/*.log
+backend/*-service.*.log
 
 # Local tools
 tools/ngrok/
