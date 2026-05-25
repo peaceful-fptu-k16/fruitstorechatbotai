@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timezone
+import json
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -29,12 +32,62 @@ from backend.schemas import (
     AdminUpdateStockResponse,
     InventoryEventOut,
     InventoryEventsResponse,
+    QaInsightsResponse,
+    QaIntentStat,
+    QaNoMatchSample,
+    QaReasonStat,
     ProductUpdateRequest,
     ProductUpdateResponse,
     UpdatedStockItem,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _resolve_log_path(raw_path: str) -> Path:
+    path = Path(raw_path)
+    if path.is_absolute():
+        return path
+
+    project_root = Path(__file__).resolve().parents[2]
+    return (project_root / path).resolve()
+
+
+def _read_qa_log_entries(settings: Settings, *, limit: int, window_hours: int) -> list[dict]:
+    log_path = _resolve_log_path(settings.qa_pair_log_path)
+    if not log_path.exists():
+        return []
+
+    threshold = datetime.now(timezone.utc).timestamp() - (window_hours * 3600)
+    rows: list[dict] = []
+
+    with log_path.open("r", encoding="utf-8") as log_file:
+        lines = log_file.readlines()
+
+    for raw in reversed(lines):
+        text = raw.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+
+        timestamp = payload.get("timestamp")
+        try:
+            parsed_ts = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            parsed_ts = None
+
+        if parsed_ts is not None and parsed_ts < threshold:
+            continue
+
+        rows.append(payload)
+        if len(rows) >= limit:
+            break
+
+    rows.reverse()
+    return rows
 
 
 def _refresh_local_product_state(request: Request, db: Session) -> None:
@@ -209,3 +262,68 @@ def admin_inventory_events(
         for event in events
     ]
     return InventoryEventsResponse(total=len(items), items=items)
+
+
+@router.get("/qa-insights", response_model=QaInsightsResponse)
+def admin_qa_insights(
+    limit: int = 600,
+    window_hours: int = 48,
+    admin: UserContext = Depends(get_current_admin),
+    settings: Settings = Depends(get_settings),
+) -> QaInsightsResponse:
+    del admin
+
+    if limit < 50 or limit > 5000:
+        raise HTTPException(status_code=400, detail="limit must be between 50 and 5000")
+    if window_hours < 1 or window_hours > 720:
+        raise HTTPException(status_code=400, detail="window_hours must be between 1 and 720")
+
+    entries = _read_qa_log_entries(settings, limit=limit, window_hours=window_hours)
+    reason_counts: Counter[str] = Counter()
+    intent_counts: Counter[str] = Counter()
+    no_match_samples: list[QaNoMatchSample] = []
+    no_match_total = 0
+    out_of_domain_total = 0
+
+    for item in entries:
+        intent = str(item.get("intent") or "unknown")
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        reason = str(metadata.get("route_reason") or "unknown")
+        confidence_raw = item.get("confidence")
+        confidence: Optional[float]
+        try:
+            confidence = float(confidence_raw) if confidence_raw is not None else None
+        except (TypeError, ValueError):
+            confidence = None
+
+        intent_counts[intent] += 1
+        reason_counts[reason] += 1
+
+        if intent == "out_of_domain":
+            out_of_domain_total += 1
+
+        inferred_legacy_no_match = reason == "unknown" and intent == "out_of_domain" and confidence == 0.42
+        if reason == "no_match" or inferred_legacy_no_match:
+            no_match_total += 1
+            if len(no_match_samples) < 24:
+                no_match_samples.append(
+                    QaNoMatchSample(
+                        timestamp=str(item.get("timestamp") or ""),
+                        intent=intent,
+                        reason="no_match" if inferred_legacy_no_match else reason,
+                        confidence=confidence,
+                        question=str(item.get("question") or ""),
+                    )
+                )
+
+    reasons = [QaReasonStat(reason=key, count=value) for key, value in reason_counts.most_common(8)]
+    intents = [QaIntentStat(intent=key, count=value) for key, value in intent_counts.most_common(8)]
+
+    return QaInsightsResponse(
+        total=len(entries),
+        no_match_total=no_match_total,
+        out_of_domain_total=out_of_domain_total,
+        reasons=reasons,
+        intents=intents,
+        no_match_samples=no_match_samples,
+    )

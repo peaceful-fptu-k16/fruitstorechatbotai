@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 from backend.api.mappers import to_product_out
 from backend.core.cache import semantic_cache
 from backend.core.config import get_settings
+from backend.core.fruit_aliases import FRUIT_ALIASES, extract_fruit_aliases, fruit_alias_quantity_pattern
 from backend.core.services import sync_services_with_inventory
 from backend.core.text import normalize_text
 from backend.database.models import Product
-from backend.database.queries import save_message
+from backend.database.queries import get_recent_messages, save_message
 from backend.database.session import get_db
 from backend.observability.query_logger import log_qa_pair, log_user_question
 from backend.schemas import ChatRequest, ChatResponse, CitationOut
@@ -21,22 +22,36 @@ router = APIRouter(tags=["chat"])
 settings = get_settings()
 
 
-FRUIT_ENTITY_ALIASES: tuple[str, ...] = (
-    "thanh long",
-    "viet quat",
-    "xoai",
-    "cam",
-    "nho",
-    "buoi",
-    "tao",
-    "dua",
-    "chuoi",
-    "oi",
-    "kiwi",
-    "le",
-    "man",
-    "dau",
+FRUIT_ENTITY_ALIASES: tuple[str, ...] = FRUIT_ALIASES
+
+REFERENTIAL_QUERY_KEYWORDS: tuple[str, ...] = (
+    "qua do",
+    "trai do",
+    "san pham do",
+    "loai do",
+    "gia do",
+    "gia nay",
+    "gia kia",
+    "loai nay",
+    "san pham nay",
+    "day la gia",
 )
+
+
+def _build_router_message(*, user_message: str, session_id: str, db: Session) -> str:
+    normalized = normalize_text(user_message)
+    if not any(keyword in normalized for keyword in REFERENTIAL_QUERY_KEYWORDS):
+        return user_message
+
+    history = get_recent_messages(db, session_id=session_id, limit=6)
+    for message in reversed(history):
+        if message.role != "user":
+            continue
+        if normalize_text(message.content) == normalized:
+            continue
+        return f"{message.content}. {user_message}"
+
+    return user_message
 
 
 def _citations_from_results(results: list[dict], source_type: str) -> list[CitationOut]:
@@ -58,20 +73,7 @@ def _format_vnd(price: int) -> str:
 
 
 def _extract_question_entities(user_message: str) -> list[str]:
-    normalized = normalize_text(user_message)
-    entities: list[str] = []
-    seen: set[str] = set()
-
-    for alias in sorted(FRUIT_ENTITY_ALIASES, key=len, reverse=True):
-        pattern = rf"(?<!\w){re.escape(alias)}(?!\w)"
-        if re.search(pattern, normalized) is None:
-            continue
-        if alias in seen:
-            continue
-        seen.add(alias)
-        entities.append(alias)
-
-    return entities
+    return extract_fruit_aliases(user_message, aliases=FRUIT_ENTITY_ALIASES)
 
 
 def _extract_answer_prices(answer: str) -> list[int]:
@@ -178,6 +180,97 @@ def _build_inventory_not_found_answer(*, alternatives: list[Product]) -> str:
         names = _join_human_list([product.name for product in alternatives[:4]])
         answer += f" Hiện shop còn {names}; bạn có thể hỏi mình lọc theo vị hoặc ngân sách."
     return answer
+
+
+def _looks_like_total_cost_question(user_message: str) -> bool:
+    normalized = normalize_text(user_message)
+    return any(
+        keyword in normalized
+        for keyword in (
+            "tong",
+            "tong cong",
+            "thanh tien",
+            "het bao nhieu",
+            "bao nhieu tien",
+            "tinh tien",
+            "tinh tong",
+            "all bao nhieu",
+        )
+    )
+
+
+def _extract_quantity_items(user_message: str) -> list[tuple[str, int]]:
+    normalized = normalize_text(user_message)
+    found: list[tuple[str, int]] = []
+    seen_aliases: set[str] = set()
+
+    for alias in sorted(FRUIT_ENTITY_ALIASES, key=len, reverse=True):
+        pattern = fruit_alias_quantity_pattern(alias)
+        matches = list(re.finditer(pattern, normalized))
+        if not matches:
+            continue
+
+        quantity = 0
+        for match in matches:
+            quantity_text = match.group(1)
+            quantity += int(quantity_text) if quantity_text else 1
+
+        if alias in seen_aliases:
+            continue
+        seen_aliases.add(alias)
+        found.append((alias, max(1, quantity)))
+
+    return found
+
+
+def _build_total_cost_answer(
+    *,
+    user_message: str,
+    quantity_items: list[tuple[str, int]],
+    inventory_agent,
+    db: Session,
+) -> tuple[str, list[Product], bool]:
+    if not _looks_like_total_cost_question(user_message):
+        return "", [], False
+
+    if len(quantity_items) < 2 and not any(quantity > 1 for _, quantity in quantity_items):
+        return "", [], False
+
+    matched_products: list[tuple[Product, int]] = []
+    seen_ids: set[int] = set()
+    for alias, quantity in quantity_items:
+        matches = inventory_agent.check_inventory_by_name(db, alias)
+        if not matches:
+            continue
+        product = matches[0]
+        if product.id in seen_ids:
+            continue
+        seen_ids.add(product.id)
+        matched_products.append((product, quantity))
+
+    if len(matched_products) < 2 and not any(quantity > 1 for _, quantity in matched_products):
+        return "", [], False
+
+    line_items: list[str] = []
+    shortage_notes: list[str] = []
+    total = 0
+    ordered_products: list[Product] = []
+
+    for product, quantity in matched_products:
+        ordered_products.append(product)
+        subtotal = product.price * quantity
+        total += subtotal
+        line_items.append(f"{quantity} {product.name} x {_format_vnd(product.price)} = {_format_vnd(subtotal)}")
+        if quantity > product.stock:
+            shortage_notes.append(
+                f"{product.name} hiện còn {product.stock}, thấp hơn số lượng bạn hỏi ({quantity})."
+            )
+
+    summary = f"Tạm tính đơn của bạn: {'; '.join(line_items)}. Tổng cộng {_format_vnd(total)}."
+    if shortage_notes:
+        summary += f" Lưu ý tồn kho: {' '.join(shortage_notes)}"
+
+    return summary, ordered_products, True
 
 
 def _validate_and_repair_answer(
@@ -554,14 +647,15 @@ def handle_chat_request(
     )
 
     services.memory_agent.update_from_message(payload.session_id, payload.message)
-    route = services.router_agent.route(payload.message)
+    route_input = _build_router_message(user_message=payload.message, session_id=payload.session_id, db=db)
+    route = services.router_agent.route(route_input)
 
     products: list[Product] = []
     citations: list[CitationOut] = []
     fallback = False
     recommendation_constraints: dict = {}
 
-    if route.intent == "available_products":
+    if route.intent in {"greeting", "available_products"}:
         products = services.inventory_agent.list_available(db, limit=24)
         focus_products = services.inventory_agent.infer_focus_products(db, payload.message, limit=3)
 
@@ -581,15 +675,27 @@ def handle_chat_request(
             products = focus_products + [product for product in products if product.id not in focus_ids]
             products = products[:8]
 
-    elif route.intent == "inventory_check":
-        candidate_name = services.inventory_agent.extract_candidate_name(payload.message)
-        matches = services.inventory_agent.check_inventory_by_name(db, candidate_name)
-        if matches:
-            products = matches
-            answer = _build_inventory_answer(user_message=payload.message, products=matches)
+    elif route.intent in {"price_general", "inventory_check"}:
+        quantity_items = _extract_quantity_items(payload.message)
+        total_answer, total_products, handled_total = _build_total_cost_answer(
+            user_message=payload.message,
+            quantity_items=quantity_items,
+            inventory_agent=services.inventory_agent,
+            db=db,
+        )
+
+        if handled_total:
+            products = total_products
+            answer = total_answer
         else:
-            alternatives = services.inventory_agent.list_available(db, limit=4)
-            answer = _build_inventory_not_found_answer(alternatives=alternatives)
+            candidate_name = services.inventory_agent.extract_candidate_name(payload.message)
+            matches = services.inventory_agent.check_inventory_by_name(db, candidate_name)
+            if matches:
+                products = matches
+                answer = _build_inventory_answer(user_message=payload.message, products=matches)
+            else:
+                alternatives = services.inventory_agent.list_available(db, limit=4)
+                answer = _build_inventory_not_found_answer(alternatives=alternatives)
 
     elif route.intent == "recommendation":
         cache_key = f"chat:rec:v6:{normalize_text(payload.message)}"
@@ -639,6 +745,13 @@ def handle_chat_request(
                 },
                 ttl_seconds=120,
             )
+
+    elif route.intent == "order_support":
+        answer = (
+            "Bạn có thể đặt hàng ngay trên chat bằng cách gửi: tên sản phẩm + số lượng + địa chỉ nhận. "
+            "Ví dụ: 2 táo Envy, 1 cam Úc, giao về 44 Trần Thái Tông. "
+            "Mình sẽ giúp bạn kiểm tra tồn và tạm tính trước khi chốt đơn."
+        )
 
     elif route.intent in {"faq_shipping", "faq_return", "faq_storage"}:
         cache_key = f"chat:faq:{normalize_text(payload.message)}"
@@ -710,7 +823,7 @@ def handle_chat_request(
         session_id=payload.session_id,
         intent=route.intent,
         confidence=route.confidence,
-        metadata={"trace_id": trace_id, "rewrite_mode": rewrite_mode},
+        metadata={"trace_id": trace_id, "rewrite_mode": rewrite_mode, "route_reason": route.reason},
         review=quality_review,
     )
 

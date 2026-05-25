@@ -7,27 +7,13 @@ from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
 
 from backend.agents.memory_agent import PreferenceProfile
+from backend.core.fruit_aliases import FRUIT_ALIASES, extract_fruit_aliases
 from backend.core.text import normalize_text
 from backend.database.models import Product
 from backend.rag.embeddings import SentenceTransformerEmbeddingModel
 
 
-FRUIT_ENTITY_ALIASES: tuple[str, ...] = (
-    "thanh long",
-    "viet quat",
-    "xoai",
-    "cam",
-    "nho",
-    "buoi",
-    "tao",
-    "dua",
-    "chuoi",
-    "oi",
-    "kiwi",
-    "le",
-    "man",
-    "dau",
-)
+FRUIT_ENTITY_ALIASES: tuple[str, ...] = FRUIT_ALIASES
 
 
 class RecommendationAgent:
@@ -114,20 +100,7 @@ class RecommendationAgent:
         return min_price, max_price
 
     def _extract_requested_entities(self, normalized_query: str) -> list[str]:
-        requested: list[str] = []
-        seen: set[str] = set()
-
-        for alias in sorted(FRUIT_ENTITY_ALIASES, key=len, reverse=True):
-            pattern = rf"(?<!\w){re.escape(alias)}(?!\w)"
-            if re.search(pattern, normalized_query) is None:
-                continue
-
-            if alias in seen:
-                continue
-            seen.add(alias)
-            requested.append(alias)
-
-        return requested
+        return extract_fruit_aliases(normalized_query, aliases=FRUIT_ENTITY_ALIASES)
 
     def parse_preferences(self, query: str, profile: PreferenceProfile) -> dict:
         normalized = normalize_text(query)

@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import re
 from typing import Optional, Protocol
 
 import numpy as np
 
+from backend.core.fruit_aliases import FRUIT_ALIASES, fruit_alias_optional_context_pattern, has_fruit_alias
 from backend.core.text import normalize_text
 from backend.rag.embeddings import SentenceTransformerEmbeddingModel
 from backend.schemas import IntentResult
 
+logger = logging.getLogger(__name__)
+
 SUPPORTED_INTENTS: set[str] = {
+    "greeting",
     "available_products",
+    "price_general",
     "inventory_check",
     "recommendation",
+    "order_support",
     "faq_shipping",
     "faq_return",
     "faq_storage",
@@ -22,6 +29,13 @@ SUPPORTED_INTENTS: set[str] = {
 }
 
 INTENT_SEMANTIC_HINTS: dict[str, tuple[str, ...]] = {
+    "greeting": (
+        "Xin chao shop",
+        "Hello ban oi",
+        "Alo shop oi",
+        "Chao buoi sang",
+        "Hi shop",
+    ),
     "available_products": (
         "Hôm nay shop có những trái cây nào?",
         "Danh sách sản phẩm đang bán là gì?",
@@ -40,6 +54,13 @@ INTENT_SEMANTIC_HINTS: dict[str, tuple[str, ...]] = {
         "Mặt hàng này còn hàng không?",
         "Bưởi Da Xanh còn không?",
         "Sản phẩm này đã hết hàng chưa?",
+    ),
+    "price_general": (
+        "Gia bao nhieu?",
+        "Bao nhieu tien?",
+        "Muc gia hien tai la sao?",
+        "Tam bao gia giup minh",
+        "Day la gia cho 1 qua hay 1kg?",
     ),
     "recommendation": (
         "Gợi ý giúp tôi trái cây phù hợp",
@@ -85,6 +106,13 @@ INTENT_SEMANTIC_HINTS: dict[str, tuple[str, ...]] = {
         "Có nên để xoài ngoài nhiệt độ phòng không?",
         "Nhiệt độ bảo quản phù hợp là bao nhiêu?",
         "Làm sao để trái cây lâu hỏng hơn?",
+    ),
+    "order_support": (
+        "Dat hang nhu the nao?",
+        "Huong dan cach dat mua",
+        "Toi muon dat don thi lam gi",
+        "Mua hang tren chat nay sao day",
+        "Chot don va giao hang giup minh",
     ),
     "admin_update_stock": (
         "Admin cập nhật tồn kho",
@@ -147,27 +175,35 @@ IN_DOMAIN_GUARD_KEYWORDS: tuple[str, ...] = (
     "co qua gi",
     "co trai gi",
     "hom nay co qua gi",
+    "hom nay co loai qua gi",
     "hom nay co trai gi",
     "shop co gi hom nay",
     "cua hang co gi hom nay",
     "co chuoi khong",
+    "cherry",
+    "gia cho 1 qua",
+    "1 kg",
+    "1kg",
+    "qua do",
+    "qua nay",
+    "dat hang",
+    "doi hang",
 )
 
-FRUIT_ENTITY_KEYWORDS: tuple[str, ...] = (
-    "cam",
-    "xoai",
-    "nho",
-    "buoi",
-    "chuoi",
-    "dua",
-    "tao",
-    "oi",
-    "kiwi",
-    "le",
-    "man",
-    "dau",
-    "viet quat",
-    "thanh long",
+FRUIT_ENTITY_KEYWORDS: tuple[str, ...] = FRUIT_ALIASES
+
+REFERENTIAL_CONTEXT_KEYWORDS: tuple[str, ...] = (
+    "qua do",
+    "trai do",
+    "san pham do",
+    "loai do",
+    "mon do",
+    "gia do",
+    "gia nay",
+    "gia kia",
+    "loai nay",
+    "san pham nay",
+    "day la gia",
 )
 
 PREFERENCE_GUARD_KEYWORDS: tuple[str, ...] = (
@@ -186,6 +222,20 @@ PREFERENCE_GUARD_KEYWORDS: tuple[str, ...] = (
     "nen mua",
     "phu hop",
 )
+
+INTENT_ZERO_SHOT_LABELS: dict[str, str] = {
+    "greeting": "loi chao mo dau hoi tham shop",
+    "available_products": "hoi danh sach trai cay dang ban tai shop",
+    "price_general": "hoi thong tin gia chung chua ro san pham",
+    "inventory_check": "hoi gia hoac ton kho cua san pham cu the",
+    "recommendation": "xin goi y va tu van chon trai cay",
+    "order_support": "hoi cach dat hang va chot don",
+    "faq_shipping": "hoi giao hang va van chuyen",
+    "faq_return": "hoi doi tra va hoan tien",
+    "faq_storage": "hoi bao quan trai cay",
+    "admin_update_stock": "yeu cau cap nhat ton kho boi admin",
+    "out_of_domain": "khong lien quan den shop trai cay",
+}
 
 
 @dataclass
@@ -256,6 +306,54 @@ class PretrainedSemanticIntentBackend:
         return top[0]
 
 
+class ZeroShotIntentBackend:
+    def __init__(
+        self,
+        *,
+        model_name: str = "joeddav/xlm-roberta-large-xnli",
+        local_files_only: bool = True,
+    ) -> None:
+        try:
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+        except Exception as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError("transformers is not available") from exc
+
+        tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=local_files_only, use_fast=False)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name, local_files_only=local_files_only)
+        self._classifier = pipeline(
+            "zero-shot-classification",
+            model=model,
+            tokenizer=tokenizer,
+        )
+        self._candidate_labels = [INTENT_ZERO_SHOT_LABELS[intent] for intent in SUPPORTED_INTENTS]
+        self._label_to_intent = {label: intent for intent, label in INTENT_ZERO_SHOT_LABELS.items()}
+
+    def predict_top_k(self, message: str, *, top_k: int = 3) -> list[tuple[str, float]]:
+        result = self._classifier(
+            message,
+            candidate_labels=self._candidate_labels,
+            hypothesis_template="Noi dung nay thuoc y dinh: {}.",
+            multi_label=False,
+        )
+
+        labels = result.get("labels") or []
+        scores = result.get("scores") or []
+        candidates: list[tuple[str, float]] = []
+        for label, score in zip(labels, scores):
+            intent = self._label_to_intent.get(str(label))
+            if intent is None:
+                continue
+            candidates.append((intent, float(score)))
+
+        return candidates[: max(1, top_k)]
+
+    def predict_intent(self, message: str) -> Optional[tuple[str, float]]:
+        top = self.predict_top_k(message, top_k=1)
+        if not top:
+            return None
+        return top[0]
+
+
 class RouterAgent:
     @staticmethod
     def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
@@ -263,22 +361,45 @@ class RouterAgent:
 
     @staticmethod
     def _has_fruit_entity(text: str) -> bool:
-        return any(entity in text for entity in FRUIT_ENTITY_KEYWORDS)
+        return has_fruit_alias(text, aliases=FRUIT_ENTITY_KEYWORDS)
+
+    @staticmethod
+    def _has_direct_entity_stock_question(text: str) -> bool:
+        return any(
+            re.search(rf"\bco\s+{fruit_alias_optional_context_pattern(entity)}\s+khong\b", text) is not None
+            for entity in FRUIT_ENTITY_KEYWORDS
+        )
 
     def __init__(
         self,
         *,
         use_pretrained_router: bool = True,
         model_name: str = "BAAI/bge-m3",
+        router_backend: str = "zero_shot",
+        zero_shot_model_name: str = "joeddav/xlm-roberta-large-xnli",
         min_intent_confidence: float = 0.55,
         local_files_only: bool = True,
         semantic_backend: Optional[SemanticIntentBackend] = None,
     ) -> None:
         self.semantic_backend: Optional[SemanticIntentBackend] = semantic_backend
+        self.router_backend = router_backend
+        self.zero_shot_model_name = zero_shot_model_name
         self.min_intent_confidence = min_intent_confidence
         self.local_files_only = local_files_only
 
         self.rules: tuple[Rule, ...] = (
+            Rule(
+                intent="order_support",
+                keywords=(
+                    "dat hang",
+                    "dat don",
+                    "chot don",
+                    "mua hang",
+                    "cach mua",
+                    "huong dan dat",
+                ),
+                confidence=0.92,
+            ),
             Rule(
                 intent="faq_shipping",
                 keywords=(
@@ -297,7 +418,17 @@ class RouterAgent:
             ),
             Rule(
                 intent="faq_return",
-                keywords=("doi tra", "refund", "hoan tien", "bao hanh", "hang dap", "bi dap", "hang hong", "sai don"),
+                keywords=(
+                    "doi tra",
+                    "doi hang",
+                    "refund",
+                    "hoan tien",
+                    "bao hanh",
+                    "hang dap",
+                    "bi dap",
+                    "hang hong",
+                    "sai don",
+                ),
                 confidence=0.92,
             ),
             Rule(
@@ -358,13 +489,30 @@ class RouterAgent:
         )
 
         if self.semantic_backend is None and use_pretrained_router:
-            self.semantic_backend = self._build_pretrained_backend(model_name)
+            self.semantic_backend = self._build_pretrained_backend(
+                model_name=model_name,
+                router_backend=router_backend,
+                zero_shot_model_name=zero_shot_model_name,
+            )
 
-    def _build_pretrained_backend(self, model_name: str) -> Optional[SemanticIntentBackend]:
+    def _build_pretrained_backend(
+        self,
+        *,
+        model_name: str,
+        router_backend: str,
+        zero_shot_model_name: str,
+    ) -> Optional[SemanticIntentBackend]:
+        normalized_backend = normalize_text(router_backend).replace("-", "_")
         try:
+            if normalized_backend in {"zero_shot", "zeroshot"}:
+                return ZeroShotIntentBackend(
+                    model_name=zero_shot_model_name,
+                    local_files_only=self.local_files_only,
+                )
             return PretrainedSemanticIntentBackend(model_name=model_name, local_files_only=self.local_files_only)
-        except Exception:
+        except Exception as exc:
             # Fall back to deterministic rules if pretrained model cannot be loaded.
+            logger.warning("Pretrained router (%s) disabled due to load failure: %s", normalized_backend, exc)
             return None
 
     def _has_in_domain_signal(self, normalized_message: str) -> bool:
@@ -425,9 +573,12 @@ class RouterAgent:
             return None
 
         predicted_intent, confidence = candidates[0]
+        normalized_message = normalize_text(message)
+
+        if self._has_direct_entity_stock_question(normalized_message):
+            return IntentResult(intent="inventory_check", confidence=0.82, reason="pretrained_entity_stock_guard")
 
         if predicted_intent == "out_of_domain":
-            normalized_message = normalize_text(message)
             if self._has_in_domain_signal(normalized_message):
                 guard_floor = max(0.45, self.min_intent_confidence - 0.08)
 
@@ -468,6 +619,10 @@ class RouterAgent:
         message = normalize_text(user_message)
         has_fruit_entity = self._has_fruit_entity(message)
 
+        greeting_patterns = ("hello", "xin chao", "chao shop", "alo", "helo")
+        if self._contains_any(message, greeting_patterns):
+            return IntentResult(intent="greeting", confidence=0.88, reason="greeting_in_domain")
+
         price_question_patterns = (
             "gia bao nhieu",
             "bao nhieu tien",
@@ -483,6 +638,27 @@ class RouterAgent:
         asks_product_price = self._contains_any(message, price_question_patterns) or (
             "gia" in message and not self._contains_any(message, budget_filter_patterns)
         )
+        if asks_product_price and self._contains_any(message, REFERENTIAL_CONTEXT_KEYWORDS):
+            return IntentResult(intent="inventory_check", confidence=0.72, reason="referential_price_heuristic")
+
+        if asks_product_price and not has_fruit_entity:
+            return IntentResult(intent="price_general", confidence=0.84, reason="generic_price_heuristic")
+
+        if self._contains_any(message, ("dat hang", "dat don", "chot don", "mua hang", "cach dat")):
+            return IntentResult(intent="order_support", confidence=0.90, reason="order_support_heuristic")
+
+        unit_clarification_patterns = (
+            "gia cho 1 qua",
+            "gia cho 1 kg",
+            "gia cho 1kg",
+            "1 qua hay 1 kg",
+            "1 qua hay 1kg",
+            "1kg hay 1 qua",
+            "1 kg hay 1 qua",
+        )
+        if self._contains_any(message, unit_clarification_patterns):
+            return IntentResult(intent="inventory_check", confidence=0.80, reason="price_unit_heuristic")
+
         if has_fruit_entity and asks_product_price:
             return IntentResult(intent="inventory_check", confidence=0.86, reason="entity_price_heuristic")
 
@@ -510,14 +686,19 @@ class RouterAgent:
             "nguoi gia",
             "bieu",
             "qua tang",
+            "ngon",
         )
         if self._contains_any(message, advisory_patterns):
             return IntentResult(intent="recommendation", confidence=0.84, reason="advisory_heuristic")
+
+        if has_fruit_entity and self._contains_any(message, ("ngon", "ngot", "chua", "thom", "gion", "de an")):
+            return IntentResult(intent="recommendation", confidence=0.82, reason="entity_taste_heuristic")
 
         if any(
             phrase in message
             for phrase in (
                 "hom nay co qua gi",
+                "hom nay co loai qua gi",
                 "hom nay co trai gi",
                 "shop co gi hom nay",
                 "cua hang co gi hom nay",
@@ -538,11 +719,9 @@ class RouterAgent:
             "het hang",
             "ton kho",
             "con bao nhieu",
+            "co ban khong",
         )
-        has_direct_entity_stock_question = any(
-            re.search(rf"\bco\s+{re.escape(entity)}\s+khong\b", message) is not None
-            for entity in FRUIT_ENTITY_KEYWORDS
-        )
+        has_direct_entity_stock_question = self._has_direct_entity_stock_question(message)
         if has_direct_entity_stock_question or any(pattern in message for pattern in explicit_inventory_patterns):
             return IntentResult(intent="inventory_check", confidence=0.82, reason="entity_inventory_heuristic")
 
@@ -550,7 +729,7 @@ class RouterAgent:
             if any(keyword in message for keyword in rule.keywords):
                 return IntentResult(intent=rule.intent, confidence=rule.confidence, reason="keyword_match")
 
-        if any(entity in message for entity in FRUIT_ENTITY_KEYWORDS) and any(
+        if has_fruit_entity and any(
             keyword in message for keyword in ("mua", "goi y", "tu van", "nen mua")
         ):
             return IntentResult(intent="recommendation", confidence=0.74, reason="entity_recommend_heuristic")

@@ -1,30 +1,17 @@
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from backend.core.fruit_aliases import FRUIT_ALIASES, SHORT_CONTEXTUAL_ALIASES, extract_fruit_aliases
 from backend.core.text import normalize_text
 from backend.database.models import Product
 from backend.database.queries import find_products_by_name, list_products
 
 
-PRODUCT_ALIASES: tuple[str, ...] = (
-    "thanh long",
-    "viet quat",
-    "xoai",
-    "cam",
-    "nho",
-    "buoi",
-    "tao",
-    "dua",
-    "chuoi",
-    "oi",
-    "kiwi",
-    "le",
-    "man",
-    "dau",
-)
+PRODUCT_ALIASES: tuple[str, ...] = FRUIT_ALIASES
 
 
 EXTRA_NOISE_TOKENS: tuple[str, ...] = (
@@ -49,6 +36,8 @@ class InventoryAgent:
         return list_products(db, only_available=True, query=query, limit=limit)
 
     def check_inventory_by_name(self, db: Session, product_name: str) -> list[Product]:
+        if not product_name.strip():
+            return []
         return [product for product in find_products_by_name(db, product_name, limit=5) if product.stock > 0]
 
     def infer_focus_products(self, db: Session, user_message: str, *, limit: int = 3) -> list[Product]:
@@ -57,6 +46,10 @@ class InventoryAgent:
             return []
 
         message_tokens = set(normalized_message.replace("?", " ").split())
+        matched_aliases = set(extract_fruit_aliases(normalized_message, aliases=PRODUCT_ALIASES))
+        for alias in SHORT_CONTEXTUAL_ALIASES - matched_aliases:
+            message_tokens.discard(alias)
+
         available_products = list_products(db, only_available=True, limit=60)
 
         scored: list[tuple[int, Product]] = []
@@ -72,8 +65,8 @@ class InventoryAgent:
             if token_overlap > 0:
                 score += token_overlap * 2
 
-            for alias in PRODUCT_ALIASES:
-                if alias in normalized_message and alias in normalized_name:
+            for alias in matched_aliases:
+                if re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", normalized_name) is not None:
                     score += 4
 
             if score > 0:
@@ -85,8 +78,8 @@ class InventoryAgent:
     def extract_candidate_name(self, user_message: str) -> str:
         normalized = normalize_text(user_message)
 
-        for alias in PRODUCT_ALIASES:
-            if alias in normalized:
+        for alias in extract_fruit_aliases(normalized, aliases=PRODUCT_ALIASES):
+            if alias:
                 return alias
 
         noise_tokens = (
@@ -98,7 +91,9 @@ class InventoryAgent:
             "khong",
             "khong?",
             "trai",
+            "qua",
             "cay",
+            *SHORT_CONTEXTUAL_ALIASES,
             *EXTRA_NOISE_TOKENS,
         )
         parts = [part for part in normalized.replace("?", " ").split() if part not in noise_tokens and len(part) > 1]

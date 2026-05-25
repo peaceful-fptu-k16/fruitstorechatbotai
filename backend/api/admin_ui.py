@@ -944,6 +944,7 @@ ADMIN_HTML = """<!doctype html>
           <button class="nav-btn active" type="button" data-section="productsSection">🍇 Sản phẩm</button>
           <button class="nav-btn" type="button" data-section="editorSection">🥭 Chi tiết</button>
           <button class="nav-btn" type="button" data-section="auditSection">🍃 Lịch sử</button>
+          <button class="nav-btn" type="button" data-section="routingSection">🧭 Theo dõi route</button>
         </nav>
 
         <section class="summary-panel">
@@ -1093,6 +1094,33 @@ ADMIN_HTML = """<!doctype html>
           <div id="auditList" class="audit-grid"></div>
           <div id="auditStatus" class="status"></div>
         </section>
+
+        <section id="routingSection" class="section">
+          <div class="section-head">
+            <div>
+              <h2>Theo dõi định tuyến chatbot</h2>
+              <p>Xem tỉ lệ route reason và các câu rơi nhánh no_match để tối ưu router.</p>
+            </div>
+            <button id="routingBtn" class="secondary" type="button">Tải lại route</button>
+          </div>
+
+          <div class="audit-grid" id="routingSummary"></div>
+          <div class="table-shell" style="margin-top: 14px;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:220px;">Thời gian</th>
+                  <th style="width:130px;">Intent</th>
+                  <th style="width:120px;">Reason</th>
+                  <th style="width:110px;">Conf</th>
+                  <th>Câu hỏi</th>
+                </tr>
+              </thead>
+              <tbody id="routingBody"></tbody>
+            </table>
+          </div>
+          <div id="routingStatus" class="status"></div>
+        </section>
       </main>
     </div>
   </section>
@@ -1106,7 +1134,10 @@ ADMIN_HTML = """<!doctype html>
     const stockStatus = document.querySelector("#stockStatus");
     const editStatus = document.querySelector("#editStatus");
     const auditStatus = document.querySelector("#auditStatus");
+    const routingStatus = document.querySelector("#routingStatus");
     const auditList = document.querySelector("#auditList");
+    const routingSummary = document.querySelector("#routingSummary");
+    const routingBody = document.querySelector("#routingBody");
     const searchInput = document.querySelector("#search");
     const editorEmpty = document.querySelector("#editorEmpty");
     const editorWrap = document.querySelector("#editorWrap");
@@ -1229,7 +1260,7 @@ ADMIN_HTML = """<!doctype html>
         localStorage.setItem(tokenKey, payload.access_token);
         setStatus(authStatus, `Đăng nhập thành công. Phiên hết hạn sau ${payload.expires_in_minutes} phút.`, "ok");
         showDashboard();
-        await Promise.all([loadProducts(), loadAudit()]);
+        await Promise.all([loadProducts(), loadAudit(), loadRoutingInsights()]);
       } catch (error) {
         setStatus(authStatus, error.message, "error");
       }
@@ -1452,6 +1483,76 @@ ADMIN_HTML = """<!doctype html>
       }
     }
 
+    function renderRoutingSummaryCard(title, value, note) {
+      const node = document.createElement("article");
+      node.className = "audit-item";
+      node.innerHTML = `
+        <strong>${title}</strong>
+        <div style="font-size: 28px; font-weight: 900; margin-top: 6px;">${value}</div>
+        <p class="muted" style="margin-top: 8px;">${note}</p>
+      `;
+      return node;
+    }
+
+    async function loadRoutingInsights() {
+      if (!token()) {
+        routingSummary.innerHTML = "";
+        routingBody.innerHTML = "";
+        setStatus(routingStatus, "Đăng nhập để xem định tuyến chatbot.");
+        return;
+      }
+
+      setStatus(routingStatus, "Đang tải thống kê route...");
+      try {
+        const payload = await requestJson("/admin/qa-insights?limit=1000&window_hours=72", {
+          headers: authHeaders(),
+        });
+
+        routingSummary.innerHTML = "";
+        routingSummary.appendChild(
+          renderRoutingSummaryCard("Tổng lượt QA", formatNumber(payload.total || 0), "Trong cửa sổ 72 giờ gần nhất")
+        );
+        routingSummary.appendChild(
+          renderRoutingSummaryCard("Số lượt no_match", formatNumber(payload.no_match_total || 0), "Càng thấp càng tốt")
+        );
+        routingSummary.appendChild(
+          renderRoutingSummaryCard("Số lượt out_of_domain", formatNumber(payload.out_of_domain_total || 0), "Theo intent cuối cùng")
+        );
+
+        const topReason = (payload.reasons && payload.reasons.length) ? payload.reasons[0] : null;
+        routingSummary.appendChild(
+          renderRoutingSummaryCard(
+            "Route reason phổ biến",
+            topReason ? `${topReason.reason} (${formatNumber(topReason.count)})` : "không có",
+            "Giúp phát hiện rule nào đang chi phối"
+          )
+        );
+
+        routingBody.innerHTML = "";
+        for (const item of (payload.no_match_samples || [])) {
+          const row = document.createElement("tr");
+          const confidence = item.confidence === null || item.confidence === undefined ? "-" : Number(item.confidence).toFixed(2);
+          row.innerHTML = `
+            <td>${item.timestamp ? new Date(item.timestamp).toLocaleString("vi-VN") : "-"}</td>
+            <td>${item.intent || "-"}</td>
+            <td><span class="pill">${item.reason || "-"}</span></td>
+            <td>${confidence}</td>
+            <td>${item.question || ""}</td>
+          `;
+          routingBody.appendChild(row);
+        }
+
+        const sampleCount = (payload.no_match_samples || []).length;
+        setStatus(
+          routingStatus,
+          `Đã tải ${formatNumber(payload.total || 0)} bản ghi; hiển thị ${formatNumber(sampleCount)} mẫu no_match gần nhất.",
+          "ok"
+        );
+      } catch (error) {
+        setStatus(routingStatus, error.message, "error");
+      }
+    }
+
     document.querySelector("#loginForm").addEventListener("submit", login);
     document.querySelector("#clearTokenBtn").addEventListener("click", () => {
       localStorage.removeItem(tokenKey);
@@ -1468,6 +1569,7 @@ ADMIN_HTML = """<!doctype html>
     document.querySelector("#productForm").addEventListener("submit", saveProduct);
     document.querySelector("#clearEditorBtn").addEventListener("click", clearEditor);
     document.querySelector("#auditBtn").addEventListener("click", loadAudit);
+    document.querySelector("#routingBtn").addEventListener("click", loadRoutingInsights);
     document.querySelector("#backToProductsBtn").addEventListener("click", () => switchSection("productsSection"));
     searchInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") loadProducts();
@@ -1490,7 +1592,7 @@ ADMIN_HTML = """<!doctype html>
       }
       if (token()) {
         showDashboard();
-        await loadAudit();
+        await Promise.all([loadAudit(), loadRoutingInsights()]);
       } else {
         showLogin();
       }

@@ -37,7 +37,9 @@ class ServiceFactory:
         return ServiceContainer(
             router_agent=RouterAgent(
                 use_pretrained_router=settings.use_pretrained_intent_router,
+                router_backend=settings.pretrained_intent_router_backend,
                 model_name=settings.pretrained_intent_model_name,
+                zero_shot_model_name=settings.pretrained_intent_zero_shot_model_name,
                 min_intent_confidence=settings.pretrained_intent_min_confidence,
                 local_files_only=not settings.allow_remote_model_download,
             ),

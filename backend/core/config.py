@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     use_chroma: bool = False
     allow_remote_model_download: bool = True
     use_pretrained_intent_router: bool = True
+    pretrained_intent_router_backend: str = "zero_shot"
     pretrained_intent_model_name: str = "BAAI/bge-m3"
+    pretrained_intent_zero_shot_model_name: str = "joeddav/xlm-roberta-large-xnli"
     pretrained_intent_min_confidence: float = 0.55
     embedding_backend: str = "sentence_transformers"
     embedding_model_name: str = "BAAI/bge-m3"
