@@ -66,10 +66,23 @@ _FOLLOW_UPS_BY_INTENT: dict[str, tuple[str, ...]] = {
 
 _MAX_GROUNDING_ITEMS = 8
 _MAX_GROUNDING_CHARS = 240
+_MAX_REWRITE_SENTENCES = 2
+_MAX_REWRITE_TOKENS = 180
 
 
 def _clean_text(value: str) -> str:
     return " ".join(value.strip().split())
+
+
+def _trim_sentences(value: str, *, max_sentences: int = _MAX_REWRITE_SENTENCES) -> str:
+    cleaned = _clean_text(value)
+    if not cleaned:
+        return cleaned
+
+    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+    if len(sentences) <= max_sentences:
+        return cleaned
+    return _clean_text(" ".join(sentences[:max_sentences]))
 
 
 class ResponseRewriter:
@@ -341,6 +354,39 @@ class ResponseRewriter:
         bullets = "\n".join(f"- {item}" for item in rag_context)
         return f"Nguồn dữ kiện truy hồi (RAG):\n{bullets}"
 
+    @staticmethod
+    def _build_rewrite_prompt(
+        *,
+        base_answer: str,
+        user_message: str,
+        intent: str,
+        tone: str,
+        allow_follow_up: bool,
+        grounding_block: str,
+    ) -> str:
+        follow_up_rule = (
+            "Nếu thật sự hữu ích, có thể thêm 1 câu hỏi gợi mở rất ngắn; nếu không cần thì dừng."
+            if allow_follow_up
+            else "Không thêm câu hỏi gợi mở ở cuối."
+        )
+
+        return (
+            "Bạn là chatbot tư vấn bán trái cây trên Facebook Messenger.\n"
+            "Nhiệm vụ: viết lại bản nháp thành câu trả lời cuối cùng bằng tiếng Việt có dấu.\n"
+            "Ưu tiên bắt buộc theo thứ tự:\n"
+            "1. Đúng dữ kiện: chỉ dùng bản nháp và nguồn RAG; không bịa tên sản phẩm, giá, tồn kho, mức vị, chính sách hoặc khuyến mãi.\n"
+            "2. Trả lời trực tiếp câu hỏi ngay ở câu đầu; nếu người dùng hỏi giá/tồn kho thì nêu giá/tồn kho trước.\n"
+            "3. Ngắn gọn nhất có thể: tối đa 2 câu, không mở bài dài, không lặp ý.\n"
+            "4. Giọng vui tươi nhẹ, thân thiện như nhân viên shop trái cây; xưng mình/bạn; không emoji, không markdown, không hashtag.\n"
+            "5. Nếu thiếu dữ kiện hoặc không chắc, nói rõ là mình chưa có thông tin thay vì đoán.\n"
+            f"Phong cách nhỏ: {tone}. {follow_up_rule}\n\n"
+            f"Intent: {intent}\n"
+            f"Câu hỏi người dùng: {user_message}\n"
+            f"{grounding_block}\n"
+            f"Bản nháp hiện tại: {base_answer}\n\n"
+            "Chỉ trả về câu trả lời cuối cùng, không giải thích."
+        )
+
     def _lm_studio_chat_urls(self) -> list[str]:
         base = self.lm_studio_base_url.rstrip("/")
         urls = [f"{base}/chat/completions"]
@@ -432,6 +478,7 @@ class ResponseRewriter:
         payload: dict = {
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.lm_studio_temperature,
+            "max_tokens": _MAX_REWRITE_TOKENS,
         }
 
         model_name = self.lm_studio_model_name or self._autodetected_lm_studio_model_name
@@ -599,31 +646,21 @@ class ResponseRewriter:
         tone = _STYLE_VARIANTS[style_idx]["tone"]
         grounding_block = self._build_grounding_block(rag_context)
 
-        follow_up_rule = (
-            "Có thể kết câu bằng 1 câu gợi mở ngắn."
-            if allow_follow_up
-            else "Không thêm câu hỏi gợi mở ở cuối."
-        )
-
-        prompt = (
-            "Bạn là trợ lý tư vấn trái cây. Hãy viết lại câu trả lời tiếng Việt cho tự nhiên hơn, "
-            "nhưng phải giữ nguyên dữ kiện thực tế (tên sản phẩm, giá, số lượng, mức độ). "
-            "Không bịa thông tin mới, không đổi nghĩa, không dùng markdown. "
-            "Chỉ dùng dữ kiện trong bản nháp và phần RAG bên dưới; nếu thiếu dữ kiện thì giữ nguyên thông tin hiện có. "
-            f"Giữ giọng điệu: {tone}. {follow_up_rule} "
-            "Loại bỏ câu lặp hoặc ý lặp, tối đa 3 câu, rõ ràng.\n\n"
-            f"Intent: {intent}\n"
-            f"Câu hỏi người dùng: {user_message}\n"
-            f"{grounding_block}\n"
-            f"Bản nháp hiện tại: {base_answer}\n\n"
-            "Trả về duy nhất câu trả lời đã viết lại."
+        prompt = self._build_rewrite_prompt(
+            base_answer=base_answer,
+            user_message=user_message,
+            intent=intent,
+            tone=tone,
+            allow_follow_up=allow_follow_up,
+            grounding_block=grounding_block,
         )
 
         generated = self._call_lm_studio(prompt=prompt)
         if not generated:
             return None
         generated = re.sub(r"[#*`]+", "", generated)
-        return _clean_text(generated)
+        generated = re.sub(r"^(Câu trả lời|Trả lời|Answer|Response)\s*:\s*", "", generated.strip(), flags=re.IGNORECASE)
+        return _trim_sentences(generated)
 
     def _style_index(self, *, user_message: str, intent: str, session_id: str) -> int:
         seed = f"{session_id}|{intent}|{normalize_text(user_message)}"
@@ -677,31 +714,22 @@ class ResponseRewriter:
         tone = _STYLE_VARIANTS[style_idx]["tone"]
         grounding_block = self._build_grounding_block(rag_context)
 
-        follow_up_rule = (
-            "Có thể kết câu bằng 1 câu gợi mở ngắn."
-            if allow_follow_up
-            else "Không thêm câu hỏi gợi mở ở cuối."
+        prompt = self._build_rewrite_prompt(
+            base_answer=base_answer,
+            user_message=user_message,
+            intent=intent,
+            tone=tone,
+            allow_follow_up=allow_follow_up,
+            grounding_block=grounding_block,
         )
 
-        prompt = (
-            "Bạn là trợ lý tư vấn trái cây. Hãy viết lại câu trả lời tiếng Việt cho tự nhiên hơn, "
-            "nhưng phải giữ nguyên dữ kiện thực tế (tên sản phẩm, giá, số lượng, mức độ). "
-            "Không bịa thông tin mới, không đổi nghĩa, không dùng markdown. "
-            "Chỉ dùng dữ kiện trong bản nháp và phần RAG bên dưới; nếu thiếu dữ kiện thì giữ nguyên thông tin hiện có. "
-            f"Giữ giọng điệu: {tone}. {follow_up_rule} "
-            "Loại bỏ câu lặp hoặc ý lặp, tối đa 3 câu, rõ ràng.\n\n"
-            f"Intent: {intent}\n"
-            f"Câu hỏi người dùng: {user_message}\n"
-            f"{grounding_block}\n"
-            f"Bản nháp hiện tại: {base_answer}\n\n"
-            "Trả về duy nhất câu trả lời đã viết lại."
-        )
-
-        generated = self._call_gemini(prompt=prompt, max_output_tokens=280)
+        generated = self._call_gemini(prompt=prompt, max_output_tokens=_MAX_REWRITE_TOKENS)
         if not generated:
             return None
 
-        return _clean_text(generated)
+        generated = re.sub(r"[#*`]+", "", generated)
+        generated = re.sub(r"^(Câu trả lời|Trả lời|Answer|Response)\s*:\s*", "", generated.strip(), flags=re.IGNORECASE)
+        return _trim_sentences(generated)
 
     def _call_gemini(self, *, prompt: str, max_output_tokens: int, json_response: bool = False) -> Optional[str]:
         if not self._can_use_gemini():
