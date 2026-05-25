@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session
 from backend.api.mappers import to_product_out
 from backend.core.cache import semantic_cache
 from backend.core.config import get_settings
-from backend.core.fruit_aliases import FRUIT_ALIASES, extract_fruit_aliases, fruit_alias_quantity_pattern
+from backend.core.fruit_aliases import (
+    FRUIT_ALIASES,
+    extract_fruit_aliases,
+    fruit_alias_quantity_pattern,
+    has_unqualified_short_alias,
+)
 from backend.core.services import sync_services_with_inventory
 from backend.core.text import normalize_text
 from backend.database.models import Product
@@ -167,8 +172,10 @@ def _build_inventory_answer(*, user_message: str, products: list[Product]) -> st
     if "storage" in focuses:
         sentences.append(f"Bảo quản tốt trong khoảng {top.shelf_life_days} ngày nếu giữ đúng cách.")
 
+    normalized = normalize_text(user_message)
+    ask_more = any(keyword in normalized for keyword in ("them", "loai khac", "tuong tu", "goi y", "tham khao"))
     alternatives = [product.name for product in products[1:3]]
-    if alternatives:
+    if ask_more and alternatives:
         sentences.append(f"Mình cũng tìm thấy {_join_human_list(alternatives)} cùng nhóm liên quan.")
 
     return " ".join(sentences)
@@ -180,6 +187,29 @@ def _build_inventory_not_found_answer(*, alternatives: list[Product]) -> str:
         names = _join_human_list([product.name for product in alternatives[:4]])
         answer += f" Hiện shop còn {names}; bạn có thể hỏi mình lọc theo vị hoặc ngân sách."
     return answer
+
+
+def _build_short_alias_clarification_answer() -> str:
+    return (
+        "Mình chưa hiểu 'oi'/'le' là ổi/lê khi thiếu ngữ cảnh. "
+        "Bạn gửi 'quả ổi' hoặc 'trái lê' nhé."
+    )
+
+
+def _build_price_general_answer(*, products: list[Product]) -> str:
+    if not products:
+        return "Hiện shop chưa có bảng giá khả dụng. Bạn gửi tên sản phẩm cụ thể để mình kiểm tra lại."
+
+    price_lines = "; ".join(f"{product.name}: {_format_vnd(product.price)}" for product in products[:5])
+    return f"Bảng giá nhanh: {price_lines}."
+
+
+def _build_greeting_answer(*, products: list[Product]) -> str:
+    if not products:
+        return "Chào bạn! Hiện kho đang tạm hết sản phẩm."
+
+    names = _join_human_list([product.name for product in products[:4]])
+    return f"Chào bạn! Hôm nay shop có {names}."
 
 
 def _looks_like_total_cost_question(user_message: str) -> bool:
@@ -197,6 +227,29 @@ def _looks_like_total_cost_question(user_message: str) -> bool:
             "all bao nhieu",
         )
     )
+
+
+def _looks_like_cart_quantity_question(user_message: str, quantity_items: list[tuple[str, int]]) -> bool:
+    if not quantity_items:
+        return False
+
+    normalized = normalize_text(user_message)
+    has_cart_action = any(
+        keyword in normalized
+        for keyword in (
+            "mua",
+            "lay",
+            "dat",
+            "chot",
+            "them vao gio",
+            "cho minh",
+            "minh lay",
+            "minh mua",
+        )
+    )
+    has_multiple_lines = len(quantity_items) >= 2
+    has_multi_quantity = any(quantity > 1 for _, quantity in quantity_items)
+    return has_cart_action or has_multiple_lines or has_multi_quantity
 
 
 def _extract_quantity_items(user_message: str) -> list[tuple[str, int]]:
@@ -230,7 +283,10 @@ def _build_total_cost_answer(
     inventory_agent,
     db: Session,
 ) -> tuple[str, list[Product], bool]:
-    if not _looks_like_total_cost_question(user_message):
+    if not _looks_like_total_cost_question(user_message) and not _looks_like_cart_quantity_question(
+        user_message,
+        quantity_items,
+    ):
         return "", [], False
 
     if len(quantity_items) < 2 and not any(quantity > 1 for _, quantity in quantity_items):
@@ -431,9 +487,7 @@ def _build_comparison_answer(*, products: list[Product], constraints: dict) -> s
 def _build_recommendation_answer(
     *,
     products: list[Product],
-    reason: str,
     constraints: dict,
-    rag_ranked: list[tuple[Product, float]],
 ) -> str:
     if not products:
         return "Mình chưa tìm được sản phẩm phù hợp. Bạn thử mở rộng tiêu chí nhé."
@@ -442,83 +496,32 @@ def _build_recommendation_answer(
     if comparison_answer:
         return comparison_answer
 
-    criteria: list[str] = []
-    if constraints.get("min_sweetness") is not None:
-        criteria.append("độ ngọt cao")
-    if constraints.get("max_sweetness") is not None:
-        criteria.append("độ ngọt vừa phải")
-    if constraints.get("max_sourness") is not None:
-        criteria.append("vị ít chua")
-    if constraints.get("min_sourness") is not None:
-        criteria.append("vị chua rõ")
-    if constraints.get("max_seed") is not None:
-        criteria.append("ít hạt")
-    if constraints.get("min_juiciness") is not None:
-        criteria.append("trái mọng nước")
-    if constraints.get("min_aroma") is not None:
-        criteria.append("mùi thơm tự nhiên")
-    if constraints.get("min_crunchiness") is not None:
-        criteria.append("độ giòn")
-    if constraints.get("min_fiber") is not None:
-        criteria.append("nhiều chất xơ")
-    if constraints.get("min_vitamin_c") is not None:
-        criteria.append("trái giàu vitamin C")
-    if constraints.get("max_sugar") is not None:
-        criteria.append("trái ít đường")
-    if constraints.get("is_child_context"):
-        criteria.append("dễ ăn cho trẻ em")
-    if constraints.get("is_elderly_context"):
-        criteria.append("dễ nhai cho người lớn tuổi")
+    requested_entities: list[str] = constraints.get("requested_entities") or []
+    requested_matches = [
+        product for product in products if _product_matches_requested_entity(product, requested_entities)
+    ]
+    if requested_matches:
+        top = requested_matches[0]
+        return (
+            f"{top.name} đang còn {top.stock} sản phẩm, giá {_format_vnd(top.price)}. "
+            f"Phù hợp {top.best_use.lower()}."
+        )
 
     min_price = constraints.get("min_price")
     max_price = constraints.get("max_price") or constraints.get("budget")
+    budget_text = ""
     if min_price is not None and max_price is not None:
-        criteria.append(f"ngân sách từ {_format_vnd(int(min_price))} đến {_format_vnd(int(max_price))}")
+        budget_text = f" trong tầm {_format_vnd(int(min_price))}-{_format_vnd(int(max_price))}"
     elif min_price is not None:
-        criteria.append(f"ngân sách từ {_format_vnd(int(min_price))} trở lên")
+        budget_text = f" từ {_format_vnd(int(min_price))} trở lên"
     elif max_price is not None:
-        criteria.append(f"ngân sách không vượt quá {_format_vnd(int(max_price))}")
+        budget_text = f" dưới {_format_vnd(int(max_price))}"
 
-    style_idx = (sum(ord(ch) for ch in products[0].name) + len(criteria)) % 3
-    intros = (
-        "Mình lọc nhanh theo nhu cầu của bạn và thấy vài lựa chọn khá hợp nè.",
-        "Mình vừa so khớp theo khẩu vị bạn mô tả, kết quả khá ổn.",
-        "Dựa trên tiêu chí bạn đưa, mình chọn được những trái cây phù hợp nhất lúc này.",
-    )
-
-    if criteria:
-        intro = f"{intros[style_idx]} Mình ưu tiên {_join_human_list(criteria)}."
-    else:
-        intro = intros[style_idx]
-
-    score_by_id = {product.id: float(score) for product, score in rag_ranked}
     highlights: list[str] = []
-    for product in products[:3]:
-        evidence = [f"giá {_format_vnd(product.price)}", f"ngọt {product.sweetness_level}/10", f"chua {product.sourness_level}/10"]
+    for product in products[:2]:
+        highlights.append(f"{product.name} ({_format_vnd(product.price)}, {_product_taste_brief(product)})")
 
-        if constraints.get("min_juiciness") is not None:
-            evidence.append(f"mọng nước {product.juiciness_level}/10")
-        if constraints.get("min_crunchiness") is not None:
-            evidence.append(f"độ giòn {product.crunchiness_level}/10")
-        if constraints.get("max_sugar") is not None:
-            evidence.append(f"đường tự nhiên {product.sugar_content_level}/10")
-        if constraints.get("min_fiber") is not None:
-            evidence.append(f"chất xơ {product.fiber_level}/10")
-        if constraints.get("min_vitamin_c") is not None:
-            evidence.append(f"vitamin C {product.vitamin_c_level}/10")
-
-        # Keep a few rich attributes even when user does not specify them.
-        if len(evidence) < 6:
-            evidence.append(f"thơm {product.aroma_level}/10")
-            evidence.append(f"phù hợp: {product.best_use.lower()}")
-
-        rag_score = score_by_id.get(product.id)
-        if rag_score is not None and rag_score > 0.0:
-            evidence.append(f"điểm phù hợp {rag_score:.2f}")
-
-        highlights.append(f"{product.name} ({', '.join(evidence[:7])})")
-
-    return f"{intro} {reason} Gợi ý nổi bật: {'; '.join(highlights)}."
+    return f"Mình gợi ý{budget_text}: {'; '.join(highlights)}."
 
 
 def _product_taste_brief(product: Product) -> str:
@@ -577,54 +580,25 @@ def _build_available_products_answer(
         return "Hiện tại kho tạm hết sản phẩm. Bạn quay lại sau ít phút nhé."
 
     normalized = normalize_text(user_message)
-    style_idx = (sum(ord(ch) for ch in normalized) + len(products)) % 3
 
     if focus_products:
         top = focus_products[0]
         alternatives = [product for product in sorted(products, key=lambda item: _showcase_score(item, user_message), reverse=True) if product.id != top.id][:2]
         ask_more = any(keyword in normalized for keyword in ("them", "goi y", "tham khao", "loai khac", "so sanh"))
 
-        answer = (
-            f"Có nhé. Hôm nay {top.name} đang khá ổn: {_product_taste_brief(top)}, "
-            f"giá {_format_vnd(top.price)}, còn {top.stock}."
-        )
+        answer = f"Có nhé. {top.name} còn {top.stock} sản phẩm, giá {_format_vnd(top.price)}."
 
         if ask_more and alternatives:
             alt_names = _join_human_list([product.name for product in alternatives])
-            answer += f" Nếu muốn đổi vị, bạn có thể tham khảo thêm {alt_names}."
-
-        if ask_more:
-            followups = (
-                "Bạn muốn mình chọn thêm bản ngọt hơn hay bản ít chua hơn từ nhóm này không?",
-                "Nếu bạn thích, mình lọc tiếp theo ngân sách để chốt nhanh hơn.",
-                "Mình có thể chốt luôn 1-2 lựa chọn cùng gu để bạn dễ chọn.",
-            )
-            return f"{answer} {followups[style_idx]}"
+            answer += f" Có thể tham khảo thêm {alt_names}."
 
         return answer
 
-    ranked = sorted(products, key=lambda product: _showcase_score(product, user_message), reverse=True)
-    highlights = ranked[:4]
-    names = _join_human_list([product.name for product in highlights])
-    intros = (
-        "Mình vừa rà nhanh các mặt hàng đang có và chọn ra nhóm dễ ăn nhất.",
-        "Shop đang có vài lựa chọn ngon khá rõ theo tiêu chí bạn hỏi.",
-        "Mình lọc nhanh danh sách hôm nay và thấy các lựa chọn sau khá ổn.",
+    details = "; ".join(
+        f"{product.name} {_format_vnd(product.price)} (còn {product.stock})"
+        for product in products
     )
-
-    reasoning = ""
-    if "ngon" in normalized:
-        reasoning = " Mình ưu tiên nhóm có điểm ngọt-thơm-mọng nước cao hơn."
-    elif any(keyword in normalized for keyword in ("gia", "ngan sach", "duoi", "re")):
-        reasoning = " Mình ưu tiên các lựa chọn dễ vào ngân sách."
-
-    top = highlights[0]
-    detail = f"Gợi ý nổi bật nhất lúc này là {top.name} ({_product_taste_brief(top)}, giá {_format_vnd(top.price)})."
-
-    return (
-        f"{intros[style_idx]}{reasoning} Hiện đáng thử: {names}. "
-        f"{detail} Bạn muốn mình lọc tiếp theo vị ngọt, độ chua hay mức giá?"
-    )
+    return f"Hiện shop có {len(products)} loại: {details}."
 
 
 def handle_chat_request(
@@ -655,7 +629,12 @@ def handle_chat_request(
     fallback = False
     recommendation_constraints: dict = {}
 
-    if route.intent in {"greeting", "available_products"}:
+    if route.intent == "greeting":
+        products = services.inventory_agent.list_available(db, limit=8)
+        answer = _build_greeting_answer(products=products)
+        products = products[:8]
+
+    elif route.intent == "available_products":
         products = services.inventory_agent.list_available(db, limit=24)
         focus_products = services.inventory_agent.infer_focus_products(db, payload.message, limit=3)
 
@@ -675,7 +654,14 @@ def handle_chat_request(
             products = focus_products + [product for product in products if product.id not in focus_ids]
             products = products[:8]
 
-    elif route.intent in {"price_general", "inventory_check"}:
+    elif route.intent == "price_general":
+        if has_unqualified_short_alias(payload.message):
+            answer = _build_short_alias_clarification_answer()
+        else:
+            products = services.inventory_agent.list_available(db, limit=6)
+            answer = _build_price_general_answer(products=products)
+
+    elif route.intent == "inventory_check":
         quantity_items = _extract_quantity_items(payload.message)
         total_answer, total_products, handled_total = _build_total_cost_answer(
             user_message=payload.message,
@@ -693,6 +679,8 @@ def handle_chat_request(
             if matches:
                 products = matches
                 answer = _build_inventory_answer(user_message=payload.message, products=matches)
+            elif has_unqualified_short_alias(payload.message):
+                answer = _build_short_alias_clarification_answer()
             else:
                 alternatives = services.inventory_agent.list_available(db, limit=4)
                 answer = _build_inventory_not_found_answer(alternatives=alternatives)
@@ -709,7 +697,7 @@ def handle_chat_request(
             products = [product for product in products if product is not None and product.stock > 0]
             citations = [CitationOut(**citation) for citation in cached["citations"]]
         else:
-            products, reason = services.recommendation_agent.recommend(
+            products, _ = services.recommendation_agent.recommend(
                 db,
                 query=payload.message,
                 profile=profile,
@@ -718,20 +706,13 @@ def handle_chat_request(
                 retriever=services.retriever,
             )
 
-            rag_ranked = services.retriever.hybrid_product_search(
-                db,
-                query=payload.message,
-                top_k=max(4, len(products) * 2),
-            )
             semantic = services.retriever.semantic_search(payload.message, top_k=2, scope="product")
             citations = _citations_from_results(semantic, source_type="product")
 
             if products:
                 answer = _build_recommendation_answer(
                     products=products,
-                    reason=reason,
                     constraints=recommendation_constraints,
-                    rag_ranked=rag_ranked,
                 )
             else:
                 answer = "Mình chưa tìm được sản phẩm phù hợp. Bạn thử mở rộng tiêu chí nhé."
@@ -782,7 +763,7 @@ def handle_chat_request(
         )
 
     rag_context = _build_rag_context_for_rewrite(citations=citations, products=products)
-    allow_follow_up = route.intent not in {"inventory_check"}
+    allow_follow_up = False
 
     try:
         answer, rewrite_mode = services.response_rewriter.rewrite(
@@ -823,7 +804,12 @@ def handle_chat_request(
         session_id=payload.session_id,
         intent=route.intent,
         confidence=route.confidence,
-        metadata={"trace_id": trace_id, "rewrite_mode": rewrite_mode, "route_reason": route.reason},
+        metadata={
+            "trace_id": trace_id,
+            "rewrite_mode": rewrite_mode,
+            "route_reason": route.reason,
+            "route_input": route_input if route_input != payload.message else "",
+        },
         review=quality_review,
     )
 
@@ -833,7 +819,12 @@ def handle_chat_request(
         user_id=payload.user_id,
         role="user",
         content=payload.message,
-        metadata_json={"trace_id": trace_id, "intent": route.intent},
+        metadata_json={
+            "trace_id": trace_id,
+            "intent": route.intent,
+            "route_reason": route.reason,
+            "route_input": route_input if route_input != payload.message else "",
+        },
     )
     save_message(
         db,

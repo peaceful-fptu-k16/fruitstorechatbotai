@@ -7,7 +7,12 @@ from typing import Optional, Protocol
 
 import numpy as np
 
-from backend.core.fruit_aliases import FRUIT_ALIASES, fruit_alias_optional_context_pattern, has_fruit_alias
+from backend.core.fruit_aliases import (
+    FRUIT_ALIASES,
+    fruit_alias_optional_context_pattern,
+    fruit_alias_quantity_pattern,
+    has_fruit_alias,
+)
 from backend.core.text import normalize_text
 from backend.rag.embeddings import SentenceTransformerEmbeddingModel
 from backend.schemas import IntentResult
@@ -132,6 +137,96 @@ INTENT_SEMANTIC_HINTS: dict[str, tuple[str, ...]] = {
         "Gợi ý địa điểm du lịch cuối tuần.",
     ),
 }
+
+LABELED_INTENT_EXAMPLES: dict[str, tuple[str, ...]] = {
+    "greeting": (
+        "xin chao shop",
+        "hello ban oi",
+        "alo shop oi",
+        "chao ban minh can tu van",
+        "shop oi cho minh hoi chut",
+    ),
+    "available_products": (
+        "hom nay shop co nhung trai cay nao",
+        "danh sach san pham dang ban la gi",
+        "menu trai cay hom nay co gi",
+        "cua hang con loai nao",
+        "trong kho dang co cac loai qua gi",
+        "shop dang ban nhung loai trai cay nao",
+    ),
+    "price_general": (
+        "gia bao nhieu",
+        "bao nhieu tien",
+        "bang gia trai cay the nao",
+        "gia ben shop tinh sao",
+        "day la gia cho 1 qua hay 1kg",
+    ),
+    "inventory_check": (
+        "cam con hang khong",
+        "nho mau don con trong kho khong",
+        "xoai cat hoa loc con bao nhieu",
+        "san pham nay da het hang chua",
+        "qua oi con hang khong",
+        "trai le gia bao nhieu",
+        "kiem tra ton kho san pham",
+    ),
+    "recommendation": (
+        "goi y giup toi trai cay phu hop",
+        "tu van trai cay it chua va ngot",
+        "nen mua loai nao theo ngan sach",
+        "trai nao ngot nhat hom nay",
+        "goi y trai it chua duoi 100k",
+        "toi dang an kieng nen chon trai cay nao it duong",
+        "so sanh cam va buoi nen chon loai nao",
+        "trai cay nao hop cho tre em",
+        "minh muon loai mem de an cho nguoi lon tuoi",
+    ),
+    "order_support": (
+        "dat hang nhu the nao",
+        "huong dan cach dat mua",
+        "toi muon dat don thi lam gi",
+        "mua hang tren chat nay sao day",
+        "chot don va giao hang giup minh",
+    ),
+    "faq_shipping": (
+        "shop giao hang trong bao lau",
+        "phi van chuyen tinh nhu the nao",
+        "ship noi thanh mat bao nhieu thoi gian",
+        "co giao nhanh trong ngay khong",
+        "cod co duoc khong",
+    ),
+    "faq_return": (
+        "chinh sach doi tra ra sao",
+        "neu san pham loi co duoc hoan tien khong",
+        "hang bi dap co doi duoc khong",
+        "shop co ho tro refund khong",
+        "sai don thi xu ly the nao",
+    ),
+    "faq_storage": (
+        "bao quan trai cay nhu the nao",
+        "nen de trai cay trong tu lanh bao lau",
+        "giu trai cay tuoi lau bang cach nao",
+        "nhiet do bao quan phu hop la bao nhieu",
+        "lam sao de trai cay lau hong hon",
+    ),
+    "admin_update_stock": (
+        "admin cap nhat ton kho",
+        "cach update stock bang token admin",
+        "toi muon chinh so luong hang trong kho",
+        "api cap nhat kho cho quan tri vien",
+    ),
+    "out_of_domain": (
+        "thoi tiet hom nay nhu the nao",
+        "giup toi dat ve may bay",
+        "tin tuc bong da hom nay",
+        "viet email xin nghi phep",
+        "goi y dia diem du lich cuoi tuan",
+    ),
+}
+
+# Use clean normalized labels for embedding-based routing. The older human text
+# above can contain terminal/mojibake artifacts on Windows shells.
+INTENT_SEMANTIC_HINTS = LABELED_INTENT_EXAMPLES
 
 IN_DOMAIN_GUARD_KEYWORDS: tuple[str, ...] = (
     "trai",
@@ -370,6 +465,65 @@ class RouterAgent:
             for entity in FRUIT_ENTITY_KEYWORDS
         )
 
+    @staticmethod
+    def _has_quantity_item(text: str) -> bool:
+        return any(
+            match.group(1)
+            for entity in FRUIT_ENTITY_KEYWORDS
+            for match in re.finditer(fruit_alias_quantity_pattern(entity), text)
+        )
+
+    @staticmethod
+    def _intent_tokens(text: str) -> set[str]:
+        return {token for token in re.findall(r"\w+", normalize_text(text)) if len(token) > 1}
+
+    def _route_with_labeled_examples(self, normalized_message: str) -> Optional[IntentResult]:
+        message_tokens = self._intent_tokens(normalized_message)
+        if not message_tokens:
+            return None
+
+        best_intent = ""
+        best_score = 0.0
+        best_exact = False
+
+        for intent, examples in LABELED_INTENT_EXAMPLES.items():
+            if intent == "out_of_domain" and self._has_in_domain_signal(normalized_message):
+                continue
+
+            for example in examples:
+                normalized_example = normalize_text(example)
+                example_tokens = self._intent_tokens(normalized_example)
+                if not example_tokens:
+                    continue
+
+                exactish = normalized_example in normalized_message or normalized_message in normalized_example
+                if exactish:
+                    score = 1.0
+                else:
+                    overlap = len(message_tokens & example_tokens)
+                    if overlap == 0:
+                        continue
+                    score = overlap / max(len(message_tokens), len(example_tokens))
+
+                if score > best_score:
+                    best_intent = intent
+                    best_score = score
+                    best_exact = exactish
+
+        if not best_intent:
+            return None
+
+        threshold = 0.72 if best_exact else 0.58
+        if best_score < threshold:
+            return None
+
+        confidence = min(0.88, max(0.62, best_score))
+        return IntentResult(
+            intent=best_intent,
+            confidence=float(confidence),
+            reason="labeled_example_router",
+        )
+
     def __init__(
         self,
         *,
@@ -443,7 +597,7 @@ class RouterAgent:
             ),
             Rule(
                 intent="inventory_check",
-                keywords=("con hang", "con", "stock", "ton", "het hang"),
+                keywords=("con hang", "stock", "ton kho", "het hang"),
                 confidence=0.86,
             ),
             Rule(
@@ -612,10 +766,6 @@ class RouterAgent:
         )
 
     def route(self, user_message: str) -> IntentResult:
-        pretrained_result = self._route_with_pretrained_router(user_message)
-        if pretrained_result is not None:
-            return pretrained_result
-
         message = normalize_text(user_message)
         has_fruit_entity = self._has_fruit_entity(message)
 
@@ -635,8 +785,9 @@ class RouterAgent:
             "bao nhieu mot kg",
         )
         budget_filter_patterns = ("duoi", "tren", "ngan sach", "tam gia", "gia re", "khong qua", "toi da")
+        has_price_word = re.search(r"(?<!\w)gia(?!\w)", message) is not None
         asks_product_price = self._contains_any(message, price_question_patterns) or (
-            "gia" in message and not self._contains_any(message, budget_filter_patterns)
+            has_price_word and not self._contains_any(message, budget_filter_patterns)
         )
         if asks_product_price and self._contains_any(message, REFERENTIAL_CONTEXT_KEYWORDS):
             return IntentResult(intent="inventory_check", confidence=0.72, reason="referential_price_heuristic")
@@ -646,6 +797,9 @@ class RouterAgent:
 
         if self._contains_any(message, ("dat hang", "dat don", "chot don", "mua hang", "cach dat")):
             return IntentResult(intent="order_support", confidence=0.90, reason="order_support_heuristic")
+
+        if has_fruit_entity and self._has_quantity_item(message):
+            return IntentResult(intent="inventory_check", confidence=0.90, reason="cart_quantity_heuristic")
 
         unit_clarification_patterns = (
             "gia cho 1 qua",
@@ -729,12 +883,23 @@ class RouterAgent:
             if any(keyword in message for keyword in rule.keywords):
                 return IntentResult(intent=rule.intent, confidence=rule.confidence, reason="keyword_match")
 
+        labeled_result = self._route_with_labeled_examples(message)
+        if labeled_result is not None:
+            return labeled_result
+
+        pretrained_result = self._route_with_pretrained_router(user_message)
+        if pretrained_result is not None:
+            return pretrained_result
+
         if has_fruit_entity and any(
             keyword in message for keyword in ("mua", "goi y", "tu van", "nen mua")
         ):
             return IntentResult(intent="recommendation", confidence=0.74, reason="entity_recommend_heuristic")
 
-        if any(token in message for token in ("ngot", "chua", "mem", "hat", "mua")):
+        if any(token in message for token in ("ngot", "chua", "mem", "hat")):
             return IntentResult(intent="recommendation", confidence=0.68, reason="preference_heuristic")
+
+        if "mua" in message and self._has_in_domain_signal(message):
+            return IntentResult(intent="recommendation", confidence=0.64, reason="in_domain_purchase_heuristic")
 
         return IntentResult(intent="out_of_domain", confidence=0.42, reason="no_match")

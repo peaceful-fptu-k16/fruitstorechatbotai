@@ -26,48 +26,28 @@ _STYLE_VARIANTS: tuple[dict[str, str], ...] = (
 )
 
 
-_FOLLOW_UPS_BY_INTENT: dict[str, tuple[str, ...]] = {
-    "available_products": (
-        "Bạn muốn mình lọc tiếp theo vị ngọt, độ chua hay ngân sách?",
-        "Nếu cần, mình sẽ thu hẹp thêm theo mục đích ăn tươi hay ép nước.",
-        "Bạn thích mình chốt nhanh 1-2 lựa chọn dễ mua nhất không?",
-    ),
-    "recommendation": (
-        "Mình có thể tinh chỉnh thêm theo tiêu chí bạn ưu tiên nhất.",
-        "Nếu muốn, mình sẽ lọc thêm phương án tiết kiệm hơn.",
-        "Bạn muốn mình đẩy mạnh theo hướng ngọt hơn hay ít chua hơn?",
-    ),
-    "inventory_check": (
-        "Bạn muốn mình gợi ý thêm sản phẩm cùng nhóm vị không?",
-        "Nếu cần, mình sẽ kiểm tra thêm vài lựa chọn tương tự đang còn hàng.",
-        "Mình có thể đề xuất thêm lựa chọn thay thế nếu bạn muốn.",
-    ),
-    "faq_shipping": (
-        "Bạn muốn mình ước tính luôn khung giờ giao theo khu vực của bạn không?",
-        "Nếu cần, mình sẽ nói rõ thêm phần phí theo địa chỉ giao.",
-        "Mình có thể hướng dẫn luôn cách đặt để nhận nhanh nhất.",
-    ),
-    "faq_return": (
-        "Bạn muốn mình tóm tắt luôn các bước đổi trả nhanh không?",
-        "Nếu cần, mình sẽ ghi rõ giấy tờ/thông tin cần chuẩn bị.",
-        "Mình có thể hướng dẫn bạn cách xử lý nhanh ngay trong chat.",
-    ),
-    "faq_storage": (
-        "Nếu muốn, mình có thể gợi ý cách bảo quản riêng theo từng loại trái.",
-        "Mình có thể tách thêm mẹo bảo quản cho tủ mát và nhiệt độ phòng.",
-        "Bạn muốn mình viết checklist bảo quản ngắn gọn để dễ áp dụng không?",
-    ),
-    "out_of_domain": (
-        "Bạn thử hỏi theo sản phẩm, vị, ngân sách hoặc tình trạng còn hàng nhé.",
-        "Mình hỗ trợ tốt nhất ở mảng trái cây, tồn kho, giao hàng và đổi trả.",
-        "Bạn gửi lại câu hỏi theo ngữ cảnh mua trái cây, mình hỗ trợ ngay.",
-    ),
-}
-
 _MAX_GROUNDING_ITEMS = 8
 _MAX_GROUNDING_CHARS = 240
 _MAX_REWRITE_SENTENCES = 2
-_MAX_REWRITE_TOKENS = 180
+_MAX_REWRITE_TOKENS = 90
+_MAX_REWRITE_WORDS = 60
+_MAX_REWRITE_WORDS_BY_INTENT: dict[str, int] = {
+    "available_products": 180,
+    "order_support": 90,
+}
+
+
+_BOILERPLATE_PREFIXES: tuple[str, ...] = (
+    "Mình cập nhật nhanh cho bạn nè:",
+    "Mình tóm tắt gọn theo nhu cầu của bạn:",
+    "Mình xem lại dữ liệu và đề xuất thế này:",
+    "Mình lọc nhanh theo nhu cầu của bạn và thấy vài lựa chọn khá hợp nè.",
+    "Mình vừa so khớp theo khẩu vị bạn mô tả, kết quả khá ổn.",
+    "Dựa trên tiêu chí bạn đưa, mình chọn được những trái cây phù hợp nhất lúc này.",
+    "Mình vừa rà nhanh các mặt hàng đang có và chọn ra nhóm dễ ăn nhất.",
+    "Shop đang có vài lựa chọn ngon khá rõ theo tiêu chí bạn hỏi.",
+    "Mình lọc nhanh danh sách hôm nay và thấy các lựa chọn sau khá ổn.",
+)
 
 
 def _clean_text(value: str) -> str:
@@ -83,6 +63,52 @@ def _trim_sentences(value: str, *, max_sentences: int = _MAX_REWRITE_SENTENCES) 
     if len(sentences) <= max_sentences:
         return cleaned
     return _clean_text(" ".join(sentences[:max_sentences]))
+
+
+def _strip_boilerplate_prefixes(value: str) -> str:
+    cleaned = _clean_text(value)
+    for prefix in _BOILERPLATE_PREFIXES:
+        cleaned = re.sub(rf"^{re.escape(prefix)}\s*", "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def _trim_words(value: str, *, max_words: int = _MAX_REWRITE_WORDS) -> str:
+    cleaned = _clean_text(value)
+    words = cleaned.split()
+    if len(words) <= max_words:
+        return cleaned
+
+    trimmed = " ".join(words[:max_words]).rstrip(" ,;:")
+    if trimmed and trimmed[-1] not in ".!?":
+        trimmed += "."
+    return trimmed
+
+
+def _strip_soft_follow_up(value: str) -> str:
+    cleaned = _clean_text(value)
+    trailing_follow_up = (
+        r"\s+(?:Nếu muốn|Nếu cần|Bạn muốn|Bạn thích|Bạn có muốn|Mình có thể|Mình sẽ)"
+        r"[^.?!]*[.?!]?$"
+    )
+    for _ in range(2):
+        shortened = re.sub(trailing_follow_up, "", cleaned, flags=re.IGNORECASE).strip()
+        if shortened == cleaned:
+            return cleaned
+        cleaned = shortened
+    return cleaned
+
+
+def _finalize_concise_answer(
+    value: str,
+    *,
+    allow_follow_up: bool = True,
+    max_words: int = _MAX_REWRITE_WORDS,
+) -> str:
+    cleaned = _strip_boilerplate_prefixes(value)
+    if not allow_follow_up:
+        cleaned = _strip_soft_follow_up(cleaned)
+    cleaned = _trim_sentences(cleaned)
+    return _trim_words(cleaned, max_words=max_words)
 
 
 class ResponseRewriter:
@@ -206,6 +232,9 @@ class ResponseRewriter:
             allow_follow_up=allow_follow_up,
         )
 
+        if self.generation_mode in {"hybrid", "compact", "direct"}:
+            return deterministic_answer, "deterministic_compact"
+
         if self._can_use_gemini() and language.lower().startswith("vi"):
             llm_answer = self._rewrite_with_llm(
                 base_answer=deterministic_answer,
@@ -314,10 +343,8 @@ class ResponseRewriter:
     def _can_use_gemini(self) -> bool:
         return self.llm_enabled and bool(self.gemini_api_key)
 
-    def _can_use_lm_studio(self, *, require_model_name: bool = False) -> bool:
+    def _can_use_lm_studio(self) -> bool:
         if not self.llm_enabled or not self.lm_studio_base_url:
-            return False
-        if require_model_name and not self.lm_studio_model_name:
             return False
         return True
 
@@ -365,7 +392,7 @@ class ResponseRewriter:
         grounding_block: str,
     ) -> str:
         follow_up_rule = (
-            "Nếu thật sự hữu ích, có thể thêm 1 câu hỏi gợi mở rất ngắn; nếu không cần thì dừng."
+            "Chỉ thêm câu hỏi gợi mở khi người dùng đang chọn mua và câu hỏi đó giúp chốt thông tin còn thiếu."
             if allow_follow_up
             else "Không thêm câu hỏi gợi mở ở cuối."
         )
@@ -376,9 +403,11 @@ class ResponseRewriter:
             "Ưu tiên bắt buộc theo thứ tự:\n"
             "1. Đúng dữ kiện: chỉ dùng bản nháp và nguồn RAG; không bịa tên sản phẩm, giá, tồn kho, mức vị, chính sách hoặc khuyến mãi.\n"
             "2. Trả lời trực tiếp câu hỏi ngay ở câu đầu; nếu người dùng hỏi giá/tồn kho thì nêu giá/tồn kho trước.\n"
-            "3. Ngắn gọn nhất có thể: tối đa 2 câu, không mở bài dài, không lặp ý.\n"
-            "4. Giọng vui tươi nhẹ, thân thiện như nhân viên shop trái cây; xưng mình/bạn; không emoji, không markdown, không hashtag.\n"
-            "5. Nếu thiếu dữ kiện hoặc không chắc, nói rõ là mình chưa có thông tin thay vì đoán.\n"
+            "3. Ngắn gọn nhất có thể: tối đa 2 câu và khoảng 45 từ; không mở bài, không giải thích quy trình, không nêu điểm phù hợp.\n"
+            "4. Không dùng các câu đệm kiểu 'Mình tóm tắt', 'Mình vừa so khớp', 'Mình xem lại dữ liệu', 'theo nhu cầu của bạn'.\n"
+            "5. Nếu người dùng hỏi một sản phẩm cụ thể, chỉ trả lời sản phẩm đó; không tự thêm sản phẩm thay thế nếu người dùng không hỏi.\n"
+            "6. Giọng thân thiện như nhân viên shop trái cây; xưng mình/bạn; không emoji, không markdown, không hashtag.\n"
+            "7. Nếu thiếu dữ kiện hoặc không chắc, nói rõ là mình chưa có thông tin thay vì đoán.\n"
             f"Phong cách nhỏ: {tone}. {follow_up_rule}\n\n"
             f"Intent: {intent}\n"
             f"Câu hỏi người dùng: {user_message}\n"
@@ -660,7 +689,11 @@ class ResponseRewriter:
             return None
         generated = re.sub(r"[#*`]+", "", generated)
         generated = re.sub(r"^(Câu trả lời|Trả lời|Answer|Response)\s*:\s*", "", generated.strip(), flags=re.IGNORECASE)
-        return _trim_sentences(generated)
+        return _finalize_concise_answer(
+            generated,
+            allow_follow_up=allow_follow_up,
+            max_words=_MAX_REWRITE_WORDS_BY_INTENT.get(intent, _MAX_REWRITE_WORDS),
+        )
 
     def _style_index(self, *, user_message: str, intent: str, session_id: str) -> int:
         seed = f"{session_id}|{intent}|{normalize_text(user_message)}"
@@ -679,26 +712,11 @@ class ResponseRewriter:
         if intent == "admin_update_stock":
             return base_answer
 
-        style_idx = self._style_index(user_message=user_message, intent=intent, session_id=session_id)
-        lead = _STYLE_VARIANTS[style_idx]["lead"]
-
-        rewritten = base_answer if base_answer.startswith(lead) else f"{lead} {base_answer}"
-
-        follow_up = self._pick_follow_up(intent=intent, style_idx=style_idx, allow_follow_up=allow_follow_up)
-        if follow_up and "?" not in rewritten:
-            rewritten = f"{rewritten} {follow_up}"
-
-        return _clean_text(rewritten)
-
-    def _pick_follow_up(self, *, intent: str, style_idx: int, allow_follow_up: bool) -> str:
-        if not allow_follow_up:
-            return ""
-
-        choices = _FOLLOW_UPS_BY_INTENT.get(intent)
-        if not choices:
-            return ""
-
-        return choices[style_idx % len(choices)]
+        return _finalize_concise_answer(
+            base_answer,
+            allow_follow_up=allow_follow_up,
+            max_words=_MAX_REWRITE_WORDS_BY_INTENT.get(intent, _MAX_REWRITE_WORDS),
+        )
 
     def _rewrite_with_llm(
         self,
@@ -729,7 +747,11 @@ class ResponseRewriter:
 
         generated = re.sub(r"[#*`]+", "", generated)
         generated = re.sub(r"^(Câu trả lời|Trả lời|Answer|Response)\s*:\s*", "", generated.strip(), flags=re.IGNORECASE)
-        return _trim_sentences(generated)
+        return _finalize_concise_answer(
+            generated,
+            allow_follow_up=allow_follow_up,
+            max_words=_MAX_REWRITE_WORDS_BY_INTENT.get(intent, _MAX_REWRITE_WORDS),
+        )
 
     def _call_gemini(self, *, prompt: str, max_output_tokens: int, json_response: bool = False) -> Optional[str]:
         if not self._can_use_gemini():

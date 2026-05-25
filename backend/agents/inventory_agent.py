@@ -35,10 +35,36 @@ class InventoryAgent:
     def list_available(self, db: Session, *, query: Optional[str] = None, limit: int = 8) -> list[Product]:
         return list_products(db, only_available=True, query=query, limit=limit)
 
+    @staticmethod
+    def _name_match_score(product: Product, query: str) -> int:
+        normalized_name = normalize_text(product.name)
+        normalized_query = normalize_text(query)
+        if not normalized_query:
+            return 0
+
+        if normalized_name == normalized_query:
+            return 100
+        if normalized_name.startswith(f"{normalized_query} "):
+            return 90
+        if re.search(rf"(?<!\w){re.escape(normalized_query)}(?!\w)", normalized_name):
+            return 60
+        if normalized_query in normalized_name:
+            return 30
+        return 0
+
     def check_inventory_by_name(self, db: Session, product_name: str) -> list[Product]:
         if not product_name.strip():
             return []
-        return [product for product in find_products_by_name(db, product_name, limit=5) if product.stock > 0]
+        matches = [product for product in find_products_by_name(db, product_name, limit=8) if product.stock > 0]
+        matches.sort(
+            key=lambda product: (
+                self._name_match_score(product, product_name),
+                product.stock,
+                -product.price,
+            ),
+            reverse=True,
+        )
+        return matches[:5]
 
     def infer_focus_products(self, db: Session, user_message: str, *, limit: int = 3) -> list[Product]:
         normalized_message = normalize_text(user_message)

@@ -3,7 +3,6 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from backend.core.text import normalize_text
-from backend.database.models import FaqDocument
 from backend.database.queries import list_faq_documents
 from backend.rag.retriever import HybridRetriever
 

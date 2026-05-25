@@ -5,7 +5,6 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from backend.core.config import get_settings
-from backend.database.models import Product
 from backend.database.queries import list_faq_documents, list_products
 from backend.rag.embeddings import BaseEmbeddingModel, HashingEmbeddingModel, SentenceTransformerEmbeddingModel
 from backend.rag.reranker import BaseReranker, CrossEncoderReranker
@@ -24,10 +23,6 @@ class HybridRetriever:
     @property
     def supports_deep_learning(self) -> bool:
         return isinstance(self.embedding_model, SentenceTransformerEmbeddingModel)
-
-    @property
-    def supports_reranking(self) -> bool:
-        return self.reranker is not None
 
     def _build_embedding_model(self) -> BaseEmbeddingModel:
         backend = self.settings.embedding_backend.strip().lower()
@@ -148,21 +143,3 @@ class HybridRetriever:
         raw_top_k = max(top_k, self.reranker_candidate_pool)
         initial = self.vector_store.similarity_search(query, top_k=raw_top_k, scope=scope)
         return self._rerank_results(query, initial, top_k=top_k)
-
-    def hybrid_product_search(self, db: Session, *, query: str, top_k: int = 4) -> list[tuple[Product, float]]:
-        sql_candidates = list_products(db, only_available=True, query=None, limit=200)
-        semantic = self.semantic_search(query, top_k=20, scope="product")
-
-        semantic_scores = {
-            item["metadata"].get("product_id"): float(item["score"]) for item in semantic if item["metadata"].get("product_id")
-        }
-
-        ranked: list[tuple[Product, float]] = []
-        q = query.lower()
-        for product in sql_candidates:
-            lexical = 1.0 if q in product.name.lower() else 0.0
-            score = semantic_scores.get(product.id, 0.0) * 0.75 + lexical * 0.25
-            ranked.append((product, score))
-
-        ranked.sort(key=lambda item: item[1], reverse=True)
-        return ranked[:top_k]
