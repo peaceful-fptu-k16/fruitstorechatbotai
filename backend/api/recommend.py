@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 
 from backend.api.mappers import to_product_out
 from backend.core.cache import semantic_cache
-from backend.core.config import get_settings
 from backend.core.services import sync_services_with_inventory
 from backend.core.text import normalize_text
 from backend.database.models import Product
@@ -12,7 +11,6 @@ from backend.observability.query_logger import log_qa_pair, log_user_question
 from backend.schemas import RecommendRequest, RecommendResponse
 
 router = APIRouter(tags=["recommend"])
-settings = get_settings()
 
 
 def _format_vnd(price: int) -> str:
@@ -99,20 +97,11 @@ def recommend_products(
                     user_message=payload.query,
                     intent="recommendation",
                     session_id=payload.session_id,
-                    language="vi",
                     allow_follow_up=False,
                     rag_context=rag_context,
                 )
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-            quality_review = {}
-            if settings.enable_answer_quality_review:
-                quality_review = services.response_rewriter.review_answer_quality(
-                    question=payload.query,
-                    answer=reasoning,
-                    intent="recommendation",
-                )
 
             log_qa_pair(
                 source="/recommend",
@@ -123,7 +112,6 @@ def recommend_products(
                 intent="recommendation",
                 confidence=None,
                 metadata={"cache": True, "rewrite_mode": rewrite_mode},
-                review=quality_review,
             )
 
             return RecommendResponse(
@@ -161,20 +149,11 @@ def recommend_products(
             user_message=payload.query,
             intent="recommendation",
             session_id=payload.session_id,
-            language="vi",
             allow_follow_up=False,
             rag_context=rag_context,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    quality_review = {}
-    if settings.enable_answer_quality_review:
-        quality_review = services.response_rewriter.review_answer_quality(
-            question=payload.query,
-            answer=reasoning,
-            intent="recommendation",
-        )
 
     log_qa_pair(
         source="/recommend",
@@ -185,7 +164,6 @@ def recommend_products(
         intent="recommendation",
         confidence=None,
         metadata={"cache": False, "rewrite_mode": rewrite_mode},
-        review=quality_review,
     )
 
     return RecommendResponse(

@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from backend.api.mappers import to_product_out
 from backend.core.cache import semantic_cache
-from backend.core.config import get_settings
 from backend.core.fruit_aliases import (
     FRUIT_ALIASES,
     extract_fruit_aliases,
@@ -24,7 +23,6 @@ from backend.observability.query_logger import log_qa_pair, log_user_question
 from backend.schemas import ChatRequest, ChatResponse, CitationOut
 
 router = APIRouter(tags=["chat"])
-settings = get_settings()
 
 
 FRUIT_ENTITY_ALIASES: tuple[str, ...] = FRUIT_ALIASES
@@ -771,7 +769,6 @@ def handle_chat_request(
             user_message=payload.message,
             intent=route.intent,
             session_id=payload.session_id,
-            language=payload.language,
             allow_follow_up=allow_follow_up,
             rag_context=rag_context,
         )
@@ -788,14 +785,6 @@ def handle_chat_request(
     if repaired:
         rewrite_mode = f"{rewrite_mode}_guard"
 
-    quality_review = {}
-    if settings.enable_answer_quality_review:
-        quality_review = services.response_rewriter.review_answer_quality(
-            question=payload.message,
-            answer=answer,
-            intent=route.intent,
-        )
-
     log_qa_pair(
         source=source,
         question=payload.message,
@@ -810,7 +799,6 @@ def handle_chat_request(
             "route_reason": route.reason,
             "route_input": route_input if route_input != payload.message else "",
         },
-        review=quality_review,
     )
 
     save_message(
@@ -837,7 +825,6 @@ def handle_chat_request(
             "intent": route.intent,
             "fallback": fallback,
             "rewrite_mode": rewrite_mode,
-            "quality_score": quality_review.get("score") if isinstance(quality_review, dict) else None,
         },
     )
 

@@ -10,19 +10,10 @@ import httpx
 from backend.core.text import normalize_text
 
 
-_STYLE_VARIANTS: tuple[dict[str, str], ...] = (
-    {
-        "lead": "Mình cập nhật nhanh cho bạn nè:",
-        "tone": "thân thiện, gần gũi",
-    },
-    {
-        "lead": "Mình tóm tắt gọn theo nhu cầu của bạn:",
-        "tone": "ngắn gọn, rõ ý",
-    },
-    {
-        "lead": "Mình xem lại dữ liệu và đề xuất thế này:",
-        "tone": "tư vấn chuyên nghiệp, tự nhiên",
-    },
+_STYLE_VARIANTS: tuple[str, ...] = (
+    "thân thiện, gần gũi",
+    "ngắn gọn, rõ ý",
+    "tư vấn chuyên nghiệp, tự nhiên",
 )
 
 
@@ -115,23 +106,11 @@ class ResponseRewriter:
     def __init__(
         self,
         *,
-        generation_mode: str = "llm_only",
-        llm_enabled: bool = True,
-        gemini_api_key: str = "",
-        gemini_model_name: str = "gemini-1.5-flash",
-        gemini_timeout_seconds: float = 6.0,
-        gemini_temperature: float = 0.2,
         lm_studio_base_url: str = "http://localhost:1234/v1",
         lm_studio_model_name: str = "",
         lm_studio_timeout_seconds: float = 15.0,
         lm_studio_temperature: float = 0.2,
     ) -> None:
-        self.generation_mode = generation_mode.strip().lower()
-        self.llm_enabled = llm_enabled
-        self.gemini_api_key = gemini_api_key.strip()
-        self.gemini_model_name = gemini_model_name
-        self.gemini_timeout_seconds = gemini_timeout_seconds
-        self.gemini_temperature = gemini_temperature
         self.lm_studio_base_url = lm_studio_base_url.rstrip("/")
         self.lm_studio_model_name = lm_studio_model_name.strip()
         self.lm_studio_timeout_seconds = lm_studio_timeout_seconds
@@ -146,7 +125,6 @@ class ResponseRewriter:
         user_message: str,
         intent: str,
         session_id: str,
-        language: str = "vi",
         allow_follow_up: bool = True,
         rag_context: Optional[list[str]] = None,
     ) -> tuple[str, str]:
@@ -156,197 +134,93 @@ class ResponseRewriter:
 
         grounding_context = self._prepare_grounding_context(rag_context)
 
-        if self.generation_mode == "deterministic":
-            deterministic_answer = self._rewrite_deterministic(
-                base_answer=cleaned,
-                user_message=user_message,
-                intent=intent,
-                session_id=session_id,
-                allow_follow_up=allow_follow_up,
-            )
-            return deterministic_answer, "deterministic"
-
-        if self.generation_mode == "lm_studio":
-            if not self._can_use_lm_studio():
-                raise RuntimeError(
-                    "Chế độ lm_studio đang bật nhưng LM Studio chưa sẵn sàng. "
-                    "Hãy kiểm tra LM_STUDIO_MODEL_NAME và server đang chạy tại LM_STUDIO_BASE_URL."
-                )
-            lm_answer = self._rewrite_with_lm_studio(
-                base_answer=cleaned,
-                user_message=user_message,
-                intent=intent,
-                session_id=session_id,
-                allow_follow_up=allow_follow_up,
-                rag_context=grounding_context,
-            )
-            if not lm_answer:
-                detail = self._last_lm_studio_error or "LM Studio không trả về nội dung hợp lệ."
-                raise RuntimeError(detail)
-            return lm_answer, "lm_studio"
-
-        if self.generation_mode == "llm_only":
-            if self._can_use_lm_studio():
-                lm_answer = self._rewrite_with_lm_studio(
-                    base_answer=cleaned,
-                    user_message=user_message,
-                    intent=intent,
-                    session_id=session_id,
-                    allow_follow_up=allow_follow_up,
-                    rag_context=grounding_context,
-                )
-                if lm_answer:
-                    return lm_answer, "lm_studio_strict"
-
-            if self._can_use_gemini() and language.lower().startswith("vi"):
-                llm_answer = self._rewrite_with_llm(
-                    base_answer=cleaned,
-                    user_message=user_message,
-                    intent=intent,
-                    session_id=session_id,
-                    allow_follow_up=allow_follow_up,
-                    rag_context=grounding_context,
-                )
-                if llm_answer:
-                    return llm_answer, "gemini_strict"
-
-            if not self._can_use_lm_studio() and not self._can_use_gemini():
-                raise RuntimeError(
-                    "Chế độ LLM-only đang bật nhưng chưa có provider nào sẵn sàng. "
-                    "Hãy cấu hình LM_STUDIO_MODEL_NAME hoặc GEMINI_API_KEY."
-                )
-
-            if self._last_lm_studio_error and not self._can_use_gemini():
-                raise RuntimeError(self._last_lm_studio_error)
-
+        if not self._can_use_lm_studio():
             raise RuntimeError(
-                "Chế độ LLM-only đang bật nhưng LLM không trả về nội dung hợp lệ. "
-                "Không áp dụng fallback theo yêu cầu hiện tại."
+                "Pipeline LM Studio chưa sẵn sàng. "
+                "Hãy kiểm tra LM_STUDIO_BASE_URL và load một model chat trong LM Studio."
             )
 
-        deterministic_answer = self._rewrite_deterministic(
+        lm_answer = self._rewrite_with_lm_studio(
             base_answer=cleaned,
             user_message=user_message,
             intent=intent,
             session_id=session_id,
             allow_follow_up=allow_follow_up,
+            rag_context=grounding_context,
         )
+        if not lm_answer:
+            detail = self._last_lm_studio_error or "LM Studio không trả về nội dung hợp lệ."
+            raise RuntimeError(detail)
 
-        if self.generation_mode in {"hybrid", "compact", "direct"}:
-            return deterministic_answer, "deterministic_compact"
+        return lm_answer, "lm_studio"
 
-        if self._can_use_gemini() and language.lower().startswith("vi"):
-            llm_answer = self._rewrite_with_llm(
-                base_answer=deterministic_answer,
-                user_message=user_message,
-                intent=intent,
-                session_id=session_id,
-                allow_follow_up=allow_follow_up,
-                rag_context=grounding_context,
-            )
-            if llm_answer:
-                return llm_answer, "gemini"
-
-        if self._can_use_lm_studio():
-            lm_answer = self._rewrite_with_lm_studio(
-                base_answer=deterministic_answer,
-                user_message=user_message,
-                intent=intent,
-                session_id=session_id,
-                allow_follow_up=allow_follow_up,
-                rag_context=grounding_context,
-            )
-            if lm_answer:
-                return lm_answer, "lm_studio"
-
-        return deterministic_answer, "deterministic"
-
-    def review_answer_quality(
+    def resolve_delivery_area(
         self,
         *,
-        question: str,
-        answer: str,
-        intent: str,
-    ) -> dict[str, Any]:
-        if not self._can_use_gemini():
-            return {
-                "review_mode": "unavailable",
-                "score": None,
-                "is_reasonable": None,
-                "strengths": [],
-                "issues": ["Gemini chưa sẵn sàng để tự đánh giá."],
-                "lessons": [],
-            }
+        query: str,
+        allowed_areas: tuple[str, ...],
+    ) -> Optional[dict[str, Any]]:
+        if not allowed_areas or not self._can_use_lm_studio():
+            return None
 
+        allowed_area_block = "\n".join(f"- {area}" for area in allowed_areas)
         prompt = (
-            "Bạn là QA reviewer cho chatbot bán trái cây. "
-            "Đánh giá câu trả lời theo mức độ đúng ý người dùng, không lặp, và rõ ràng. "
-            "Trả về JSON thuần với schema: "
-            "{\"score\":0-100,\"is_reasonable\":true/false,\"strengths\":[...],\"issues\":[...],\"lessons\":[...],\"suggested_fix\":\"...\"}. "
-            "Không thêm văn bản ngoài JSON.\n\n"
-            f"Intent: {intent}\n"
-            f"Question: {question}\n"
-            f"Answer: {answer}\n"
+            "Bạn là bộ phân tích địa chỉ giao hàng nội thành Hà Nội cho shop xuất phát từ Nam Từ Liêm.\n"
+            "Nhiệm vụ: đọc tin nhắn khách và xác định địa chỉ/phố/đường/ngõ thuộc đúng một khu vực trong danh sách cho phép.\n"
+            "Danh sách khu vực cho phép:\n"
+            f"{allowed_area_block}\n\n"
+            "Quy tắc bắt buộc:\n"
+            "- Chỉ chọn area nằm trong danh sách cho phép; không tự tạo tên khu vực khác.\n"
+            "- Dùng hiểu biết địa lý phổ biến ở Hà Nội để suy luận phố, đường, ngõ, tòa nhà hoặc khu đô thị.\n"
+            "- Nếu tên đường có thể thuộc nhiều khu vực hoặc không đủ chắc chắn, đặt area=null và confidence <= 0.5.\n"
+            "- Không tính thời gian giao hàng; chỉ phân loại khu vực.\n"
+            "- Trả về JSON thuần theo schema: "
+            "{\"area\":string|null,\"confidence\":0-1,\"matched_text\":string,\"reason\":string}.\n\n"
+            "Ví dụ:\n"
+            "Tin: ship tới ngõ 15 Duy Tân -> {\"area\":\"Cầu Giấy\",\"confidence\":0.86,\"matched_text\":\"ngõ 15 Duy Tân\",\"reason\":\"Duy Tân thuộc khu Cầu Giấy\"}\n"
+            "Tin: giao phố Quan Nhân -> {\"area\":\"Thanh Xuân\",\"confidence\":0.82,\"matched_text\":\"phố Quan Nhân\",\"reason\":\"Quan Nhân thường thuộc Thanh Xuân\"}\n"
+            "Tin: giao Nguyễn Trãi -> {\"area\":null,\"confidence\":0.4,\"matched_text\":\"Nguyễn Trãi\",\"reason\":\"Nguyễn Trãi kéo dài qua nhiều khu vực\"}\n\n"
+            f"Tin nhắn khách: {query}"
         )
 
-        raw = self._call_gemini(prompt=prompt, max_output_tokens=420, json_response=True)
+        raw = self._call_lm_studio(prompt=prompt, max_tokens=220)
         if not raw:
-            return {
-                "review_mode": "error",
-                "score": None,
-                "is_reasonable": None,
-                "strengths": [],
-                "issues": ["Gemini không trả về review."],
-                "lessons": [],
-            }
+            return None
 
         parsed = self._parse_json_payload(raw)
         if not parsed:
             parsed = self._parse_json_payload(self._normalize_json_like(raw))
-
         if not parsed:
-            return {
-                "review_mode": "error",
-                "score": None,
-                "is_reasonable": None,
-                "strengths": [],
-                "issues": ["Gemini review không đúng định dạng JSON."],
-                "lessons": [],
-            }
+            return None
 
-        score = parsed.get("score")
+        area = parsed.get("area")
+        if not isinstance(area, str) or not area.strip():
+            return None
+
+        normalized_allowed = {normalize_text(area_name): area_name for area_name in allowed_areas}
+        canonical_area = normalized_allowed.get(normalize_text(area))
+        if not canonical_area:
+            return None
+
         try:
-            score_value = int(score) if score is not None else None
-        except Exception:
-            score_value = None
+            confidence = float(parsed.get("confidence", 0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence < 0.65:
+            return None
 
-        is_reasonable = parsed.get("is_reasonable")
-        if not isinstance(is_reasonable, bool):
-            is_reasonable = None
-
-        def _as_list(value: Any) -> list[str]:
-            if not isinstance(value, list):
-                return []
-            return [str(item).strip() for item in value if str(item).strip()]
-
-        review = {
-            "review_mode": "gemini",
-            "score": score_value,
-            "is_reasonable": is_reasonable,
-            "strengths": _as_list(parsed.get("strengths")),
-            "issues": _as_list(parsed.get("issues")),
-            "lessons": _as_list(parsed.get("lessons")),
-            "suggested_fix": str(parsed.get("suggested_fix", "")).strip(),
+        matched_text = parsed.get("matched_text")
+        reason = parsed.get("reason")
+        return {
+            "area": canonical_area,
+            "confidence": confidence,
+            "matched_text": matched_text.strip() if isinstance(matched_text, str) else "",
+            "reason": reason.strip() if isinstance(reason, str) else "",
+            "provider": "lm_studio",
         }
-        return review
-
-    def _can_use_gemini(self) -> bool:
-        return self.llm_enabled and bool(self.gemini_api_key)
 
     def _can_use_lm_studio(self) -> bool:
-        if not self.llm_enabled or not self.lm_studio_base_url:
-            return False
-        return True
+        return bool(self.lm_studio_base_url)
 
     def _prepare_grounding_context(self, rag_context: Optional[list[str]]) -> list[str]:
         if not rag_context:
@@ -498,7 +372,7 @@ class ResponseRewriter:
 
         return ""
 
-    def _call_lm_studio(self, *, prompt: str) -> Optional[str]:
+    def _call_lm_studio(self, *, prompt: str, max_tokens: int = _MAX_REWRITE_TOKENS) -> Optional[str]:
         if not self._can_use_lm_studio():
             return None
 
@@ -507,7 +381,7 @@ class ResponseRewriter:
         payload: dict = {
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.lm_studio_temperature,
-            "max_tokens": _MAX_REWRITE_TOKENS,
+            "max_tokens": max_tokens,
         }
 
         model_name = self.lm_studio_model_name or self._autodetected_lm_studio_model_name
@@ -672,7 +546,7 @@ class ResponseRewriter:
         rag_context: list[str],
     ) -> Optional[str]:
         style_idx = self._style_index(user_message=user_message, intent=intent, session_id=session_id)
-        tone = _STYLE_VARIANTS[style_idx]["tone"]
+        tone = _STYLE_VARIANTS[style_idx]
         grounding_block = self._build_grounding_block(rag_context)
 
         prompt = self._build_rewrite_prompt(
@@ -699,93 +573,6 @@ class ResponseRewriter:
         seed = f"{session_id}|{intent}|{normalize_text(user_message)}"
         digest = sha256(seed.encode("utf-8")).hexdigest()
         return int(digest[:8], 16) % len(_STYLE_VARIANTS)
-
-    def _rewrite_deterministic(
-        self,
-        *,
-        base_answer: str,
-        user_message: str,
-        intent: str,
-        session_id: str,
-        allow_follow_up: bool,
-    ) -> str:
-        if intent == "admin_update_stock":
-            return base_answer
-
-        return _finalize_concise_answer(
-            base_answer,
-            allow_follow_up=allow_follow_up,
-            max_words=_MAX_REWRITE_WORDS_BY_INTENT.get(intent, _MAX_REWRITE_WORDS),
-        )
-
-    def _rewrite_with_llm(
-        self,
-        *,
-        base_answer: str,
-        user_message: str,
-        intent: str,
-        session_id: str,
-        allow_follow_up: bool,
-        rag_context: list[str],
-    ) -> Optional[str]:
-        style_idx = self._style_index(user_message=user_message, intent=intent, session_id=session_id)
-        tone = _STYLE_VARIANTS[style_idx]["tone"]
-        grounding_block = self._build_grounding_block(rag_context)
-
-        prompt = self._build_rewrite_prompt(
-            base_answer=base_answer,
-            user_message=user_message,
-            intent=intent,
-            tone=tone,
-            allow_follow_up=allow_follow_up,
-            grounding_block=grounding_block,
-        )
-
-        generated = self._call_gemini(prompt=prompt, max_output_tokens=_MAX_REWRITE_TOKENS)
-        if not generated:
-            return None
-
-        generated = re.sub(r"[#*`]+", "", generated)
-        generated = re.sub(r"^(Câu trả lời|Trả lời|Answer|Response)\s*:\s*", "", generated.strip(), flags=re.IGNORECASE)
-        return _finalize_concise_answer(
-            generated,
-            allow_follow_up=allow_follow_up,
-            max_words=_MAX_REWRITE_WORDS_BY_INTENT.get(intent, _MAX_REWRITE_WORDS),
-        )
-
-    def _call_gemini(self, *, prompt: str, max_output_tokens: int, json_response: bool = False) -> Optional[str]:
-        if not self._can_use_gemini():
-            return None
-
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": self.gemini_temperature,
-                "topP": 0.9,
-                "maxOutputTokens": max_output_tokens,
-                "thinkingConfig": {"thinkingBudget": 0},
-            },
-        }
-        if json_response:
-            payload["generationConfig"]["responseMimeType"] = "application/json"
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self.gemini_model_name}:generateContent?key={self.gemini_api_key}"
-        )
-
-        try:
-            with httpx.Client(timeout=self.gemini_timeout_seconds) as client:
-                response = client.post(url, json=payload)
-                response.raise_for_status()
-                data = response.json()
-        except Exception:
-            return None
-
-        generated = self._extract_gemini_text(data)
-        if not generated:
-            return None
-
-        return generated
 
     @staticmethod
     def _parse_json_payload(text: str) -> Optional[dict[str, Any]]:
@@ -821,7 +608,7 @@ class ResponseRewriter:
 
         candidate = candidate.replace("\r\n", "\n").replace("\r", "\n")
 
-        # Common Gemini variants: Python-like booleans/None and trailing commas.
+        # Common model variants: Python-like booleans/None and trailing commas.
         candidate = re.sub(r"\bTrue\b", "true", candidate)
         candidate = re.sub(r"\bFalse\b", "false", candidate)
         candidate = re.sub(r"\bNone\b", "null", candidate)
@@ -838,30 +625,3 @@ class ResponseRewriter:
             candidate = candidate.replace("'", '"')
 
         return candidate
-
-    @staticmethod
-    def _extract_gemini_text(payload: dict) -> Optional[str]:
-        candidates = payload.get("candidates")
-        if not isinstance(candidates, list):
-            return None
-
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-
-            content = candidate.get("content")
-            if not isinstance(content, dict):
-                continue
-
-            parts = content.get("parts")
-            if not isinstance(parts, list):
-                continue
-
-            for part in parts:
-                if not isinstance(part, dict):
-                    continue
-                text = part.get("text")
-                if isinstance(text, str) and text.strip():
-                    return text.strip()
-
-        return None

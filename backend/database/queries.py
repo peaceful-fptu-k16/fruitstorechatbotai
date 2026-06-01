@@ -407,7 +407,11 @@ def seed_products(db: Session) -> None:
     canonical_faqs = {
         "shipping": {
             "question": "Shop giao hàng trong bao lâu?",
-            "answer": "Nội thành giao trong 2-4 giờ, ngoại thành 1-2 ngày.",
+            "answer": (
+                "Nội thành Hà Nội shop ước tính theo khu vực từ Nam Từ Liêm: "
+                "thời gian di chuyển + 30 phút chuẩn bị. Bạn gửi quận/khu vực nhận hàng "
+                "để mình báo ETA cụ thể; nếu chưa rõ địa chỉ thì thường khoảng 45-90 phút."
+            ),
         },
         "return": {
             "question": "Chính sách đổi trả như thế nào?",

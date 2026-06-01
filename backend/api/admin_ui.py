@@ -156,6 +156,263 @@ ADMIN_HTML = """<!doctype html>
       gap: 12px;
     }
 
+    .grid3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .form-section {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(227, 218, 203, 0.8);
+    }
+
+    .form-section:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .section-label h3 {
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    .field-hint {
+      min-height: 18px;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    input.field-invalid, textarea.field-invalid {
+      border-color: rgba(180, 35, 24, 0.75);
+      box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.09);
+    }
+
+    .smart-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 6px;
+    }
+
+    .smart-toolbar button,
+    .chip {
+      min-height: 34px;
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-size: 12px;
+    }
+
+    .quick-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 8px;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      background: #fff8e9;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 850;
+    }
+
+    .chip:hover {
+      border-color: rgba(36, 120, 78, 0.38);
+      box-shadow: var(--soft-shadow);
+      transform: translateY(-1px);
+    }
+
+    .chip:active {
+      transform: scale(0.98);
+    }
+
+    .sensory-board {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .sensory-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(227, 218, 203, 0.92);
+      border-radius: 18px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(255, 248, 233, 0.84)),
+        linear-gradient(90deg, rgba(36, 120, 78, 0.06), rgba(255, 189, 71, 0.08));
+      padding: 13px;
+      box-shadow: 0 10px 24px rgba(59, 42, 22, 0.06);
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+      animation: sectionIn 360ms ease both;
+    }
+
+    .sensory-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: linear-gradient(180deg, var(--leaf), var(--mango), var(--berry));
+      opacity: 0.78;
+    }
+
+    .sensory-card:hover {
+      border-color: rgba(36, 120, 78, 0.38);
+      box-shadow: 0 16px 34px rgba(59, 42, 22, 0.12);
+      transform: translateY(-2px);
+    }
+
+    .sensory-card:nth-child(2) { animation-delay: 35ms; }
+    .sensory-card:nth-child(3) { animation-delay: 70ms; }
+    .sensory-card:nth-child(4) { animation-delay: 105ms; }
+    .sensory-card:nth-child(5) { animation-delay: 140ms; }
+    .sensory-card:nth-child(6) { animation-delay: 175ms; }
+
+    .sensory-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 10px;
+    }
+
+    .sensory-icon {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 auto;
+      border-radius: 12px;
+      background: #fff1c8;
+      box-shadow: inset 0 -8px 14px rgba(255, 189, 71, 0.18);
+      font-size: 18px;
+      animation: gentleBob 3.2s ease-in-out infinite;
+    }
+
+    .sensory-title {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .sensory-title label {
+      margin: 0;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .sensory-title span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .sensory-value {
+      min-width: 48px;
+      border-radius: 999px;
+      background: var(--text);
+      color: white;
+      padding: 5px 8px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 950;
+      font-variant-numeric: tabular-nums;
+      box-shadow: 0 8px 16px rgba(31, 42, 36, 0.16);
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    .sensory-card:focus-within .sensory-value {
+      background: var(--leaf);
+      transform: scale(1.06);
+    }
+
+    .smart-range {
+      --range: 50%;
+      display: block;
+      width: 100%;
+      height: 28px;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      appearance: none;
+      cursor: pointer;
+    }
+
+    .smart-range:focus {
+      box-shadow: none;
+      outline: none;
+    }
+
+    .smart-range::-webkit-slider-runnable-track {
+      height: 10px;
+      border-radius: 999px;
+      background:
+        linear-gradient(90deg, var(--leaf), var(--mango), var(--berry)) 0 / var(--range) 100% no-repeat,
+        #efe7d9;
+      box-shadow: inset 0 1px 2px rgba(31, 42, 36, 0.1);
+    }
+
+    .smart-range::-webkit-slider-thumb {
+      appearance: none;
+      width: 24px;
+      height: 24px;
+      margin-top: -7px;
+      border: 3px solid white;
+      border-radius: 50%;
+      background: var(--leaf);
+      box-shadow: 0 8px 18px rgba(36, 120, 78, 0.28);
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    .smart-range:active::-webkit-slider-thumb {
+      background: var(--orange);
+      transform: scale(1.16);
+    }
+
+    .smart-range::-moz-range-track {
+      height: 10px;
+      border-radius: 999px;
+      background: #efe7d9;
+    }
+
+    .smart-range::-moz-range-progress {
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--leaf), var(--mango), var(--berry));
+    }
+
+    .smart-range::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border: 3px solid white;
+      border-radius: 50%;
+      background: var(--leaf);
+      box-shadow: 0 8px 18px rgba(36, 120, 78, 0.28);
+    }
+
+    .range-scale {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 850;
+    }
+
     .view {
       min-height: 100vh;
       animation: viewIn 460ms ease both;
@@ -620,6 +877,13 @@ ADMIN_HTML = """<!doctype html>
       background: rgba(255, 253, 248, 0.92);
       box-shadow: var(--shadow);
       padding: 20px;
+      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+      animation: sectionIn 420ms ease both;
+    }
+
+    .form-panel:hover {
+      border-color: rgba(36, 120, 78, 0.2);
+      box-shadow: 0 22px 58px rgba(59, 42, 22, 0.15);
     }
 
     .editor-empty {
@@ -644,13 +908,84 @@ ADMIN_HTML = """<!doctype html>
       gap: 12px;
     }
 
+    .smart-panel {
+      display: grid;
+      gap: 12px;
+    }
+
+    .smart-score {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid rgba(227, 218, 203, 0.94);
+      border-radius: 18px;
+      background: #fff8e9;
+    }
+
+    .smart-score strong {
+      font-size: 24px;
+      font-weight: 950;
+      white-space: nowrap;
+      animation: scoreBreathe 3.1s ease-in-out infinite;
+    }
+
+    .smart-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .smart-list li {
+      border: 1px solid rgba(227, 218, 203, 0.86);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.74);
+      padding: 9px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .smart-list li.warn {
+      border-color: rgba(244, 122, 54, 0.36);
+      background: rgba(255, 189, 71, 0.13);
+      color: #8a4b0a;
+    }
+
+    .smart-list li.ok {
+      border-color: rgba(36, 120, 78, 0.25);
+      background: rgba(36, 120, 78, 0.08);
+      color: var(--leaf-dark);
+    }
+
+    .changed-fields {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      min-height: 24px;
+    }
+
     .preview-card {
+      position: relative;
       border-radius: 24px;
       background: linear-gradient(145deg, rgba(36, 120, 78, 0.95), rgba(244, 122, 54, 0.9));
       color: white;
       padding: 20px;
       overflow: hidden;
       box-shadow: var(--shadow);
+    }
+
+    .preview-card::after {
+      content: "";
+      position: absolute;
+      inset: -40% -65%;
+      background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.24) 50%, transparent 65%);
+      transform: translateX(-40%);
+      animation: previewShine 5.8s ease-in-out infinite;
+      pointer-events: none;
     }
 
     .preview-card .emoji {
@@ -661,15 +996,60 @@ ADMIN_HTML = """<!doctype html>
     }
 
     .preview-card strong {
+      position: relative;
       display: block;
       font-size: 22px;
       line-height: 1.15;
+      z-index: 1;
+    }
+
+    .preview-card p {
+      position: relative;
+      z-index: 1;
+    }
+
+    .taste-radar {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+      margin-top: 16px;
+    }
+
+    .radar-chip {
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 13px;
+      background: rgba(255, 255, 255, 0.14);
+      padding: 7px 6px;
+      text-align: center;
+      backdrop-filter: blur(8px);
+    }
+
+    .radar-chip b {
+      display: block;
+      font-size: 14px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .radar-chip span {
+      display: block;
+      font-size: 10px;
+      font-weight: 850;
+      opacity: 0.84;
     }
 
     .taste-list {
       display: grid;
       gap: 10px;
       margin-top: 14px;
+    }
+
+    .admin-summary {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      line-height: 1.5;
     }
 
     .taste-row {
@@ -788,6 +1168,16 @@ ADMIN_HTML = """<!doctype html>
       to { width: var(--value, 50%); }
     }
 
+    @keyframes previewShine {
+      0%, 58%, 100% { transform: translateX(-45%) rotate(0deg); }
+      72% { transform: translateX(45%) rotate(2deg); }
+    }
+
+    @keyframes scoreBreathe {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.06); }
+    }
+
     @media (max-width: 1120px) {
       .dashboard-shell {
         grid-template-columns: 1fr;
@@ -847,6 +1237,14 @@ ADMIN_HTML = """<!doctype html>
         min-width: 0;
       }
 
+      .grid3 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .sensory-board {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
       .audit-grid {
         grid-template-columns: 1fr;
       }
@@ -863,6 +1261,14 @@ ADMIN_HTML = """<!doctype html>
 
       .login-story h1 {
         font-size: 38px;
+      }
+
+      .grid2, .grid3 {
+        grid-template-columns: 1fr;
+      }
+
+      .sensory-board {
+        grid-template-columns: 1fr;
       }
 
       .sidebar {
@@ -1013,50 +1419,157 @@ ADMIN_HTML = """<!doctype html>
 
           <div id="editorWrap" class="editor-grid hidden">
             <form id="productForm" class="form-panel">
-              <div class="grid2">
-                <div>
-                  <label for="editName">Tên sản phẩm</label>
-                  <input id="editName" />
+              <div class="form-section">
+                <div class="section-label">
+                  <h3>Thông tin bán hàng</h3>
+                  <span class="pill" id="dirtyCount">0 thay đổi</span>
                 </div>
-                <div>
-                  <label for="editPrice">Giá bán</label>
-                  <input id="editPrice" type="number" min="0" />
+                <div class="grid2">
+                  <div>
+                    <label for="editName">Tên sản phẩm</label>
+                    <input id="editName" />
+                  </div>
+                  <div>
+                    <label for="editPrice">Giá bán</label>
+                    <input id="editPrice" type="number" min="0" step="1000" />
+                  </div>
                 </div>
-              </div>
-              <div class="grid2">
-                <div>
-                  <label for="editOrigin">Nguồn gốc</label>
-                  <input id="editOrigin" />
-                </div>
-                <div>
-                  <label for="editSeason">Mùa vụ</label>
-                  <input id="editSeason" />
-                </div>
-              </div>
-              <div class="grid2">
-                <div>
-                  <label for="editSweet">Độ ngọt 0-10</label>
-                  <input id="editSweet" type="number" min="0" max="10" />
-                </div>
-                <div>
-                  <label for="editSour">Độ chua 0-10</label>
-                  <input id="editSour" type="number" min="0" max="10" />
-                </div>
-              </div>
-              <div class="grid2">
-                <div>
-                  <label for="editJuicy">Độ mọng nước 0-10</label>
-                  <input id="editJuicy" type="number" min="0" max="10" />
-                </div>
-                <div>
-                  <label for="editAroma">Độ thơm 0-10</label>
-                  <input id="editAroma" type="number" min="0" max="10" />
+                <div class="grid3">
+                  <div>
+                    <label for="editCategory">Nhóm hàng</label>
+                    <input id="editCategory" placeholder="fruit" />
+                  </div>
+                  <div>
+                    <label for="editOrigin">Nguồn gốc</label>
+                    <input id="editOrigin" />
+                  </div>
+                  <div>
+                    <label for="editSeason">Mùa vụ</label>
+                    <input id="editSeason" />
+                  </div>
                 </div>
               </div>
-              <label for="editBestUse">Gợi ý sử dụng</label>
-              <input id="editBestUse" />
-              <label for="editDescription">Mô tả sản phẩm</label>
-              <textarea id="editDescription"></textarea>
+
+              <div class="form-section">
+                <div class="section-label">
+                  <h3>Hồ sơ cảm quan</h3>
+                  <span class="muted">0 là thấp, 10 là cao</span>
+                </div>
+                <div class="quick-chips">
+                  <button class="chip" type="button" data-preset="sweet">Ngọt đậm</button>
+                  <button class="chip" type="button" data-preset="balanced">Cân bằng</button>
+                  <button class="chip" type="button" data-preset="juicy">Mọng nước</button>
+                  <button class="chip" type="button" data-preset="diet">Ít đường</button>
+                  <button class="chip" type="button" data-preset="crisp">Giòn tươi</button>
+                </div>
+                <div class="sensory-board">
+                  <div class="sensory-card">
+                    <div class="sensory-head">
+                      <span class="sensory-icon">🍯</span>
+                      <div class="sensory-title"><label for="editSweet">Độ ngọt</label><span>Vị ngọt tự nhiên</span></div>
+                      <output id="editSweetOut" class="sensory-value" for="editSweet">0/10</output>
+                    </div>
+                    <input id="editSweet" class="smart-range" type="range" min="0" max="10" step="1" />
+                    <div class="range-scale"><span>nhẹ</span><span>đậm</span></div>
+                  </div>
+                  <div class="sensory-card">
+                    <div class="sensory-head">
+                      <span class="sensory-icon">🍋</span>
+                      <div class="sensory-title"><label for="editSour">Độ chua</label><span>Độ chua khi ăn tươi</span></div>
+                      <output id="editSourOut" class="sensory-value" for="editSour">0/10</output>
+                    </div>
+                    <input id="editSour" class="smart-range" type="range" min="0" max="10" step="1" />
+                    <div class="range-scale"><span>êm</span><span>rõ</span></div>
+                  </div>
+                  <div class="sensory-card">
+                    <div class="sensory-head">
+                      <span class="sensory-icon">🌰</span>
+                      <div class="sensory-title"><label for="editSeed">Độ hạt</label><span>Hạt càng thấp càng dễ ăn</span></div>
+                      <output id="editSeedOut" class="sensory-value" for="editSeed">0/10</output>
+                    </div>
+                    <input id="editSeed" class="smart-range" type="range" min="0" max="10" step="1" />
+                    <div class="range-scale"><span>ít</span><span>nhiều</span></div>
+                  </div>
+                  <div class="sensory-card">
+                    <div class="sensory-head">
+                      <span class="sensory-icon">💧</span>
+                      <div class="sensory-title"><label for="editJuicy">Mọng nước</label><span>Cảm giác nước và độ tươi</span></div>
+                      <output id="editJuicyOut" class="sensory-value" for="editJuicy">0/10</output>
+                    </div>
+                    <input id="editJuicy" class="smart-range" type="range" min="0" max="10" step="1" />
+                    <div class="range-scale"><span>khô</span><span>mọng</span></div>
+                  </div>
+                  <div class="sensory-card">
+                    <div class="sensory-head">
+                      <span class="sensory-icon">🌿</span>
+                      <div class="sensory-title"><label for="editAroma">Độ thơm</label><span>Mùi hương khi mở hộp</span></div>
+                      <output id="editAromaOut" class="sensory-value" for="editAroma">0/10</output>
+                    </div>
+                    <input id="editAroma" class="smart-range" type="range" min="0" max="10" step="1" />
+                    <div class="range-scale"><span>nhẹ</span><span>thơm</span></div>
+                  </div>
+                  <div class="sensory-card">
+                    <div class="sensory-head">
+                      <span class="sensory-icon">✨</span>
+                      <div class="sensory-title"><label for="editCrunch">Độ giòn</label><span>Độ chắc và tiếng giòn</span></div>
+                      <output id="editCrunchOut" class="sensory-value" for="editCrunch">0/10</output>
+                    </div>
+                    <input id="editCrunch" class="smart-range" type="range" min="0" max="10" step="1" />
+                    <div class="range-scale"><span>mềm</span><span>giòn</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <div class="section-label">
+                  <h3>Dinh dưỡng và bảo quản</h3>
+                </div>
+                <div class="grid3">
+                  <div>
+                    <label for="editFiber">Chất xơ 0-10</label>
+                    <input id="editFiber" type="number" min="0" max="10" />
+                  </div>
+                  <div>
+                    <label for="editVitaminC">Vitamin C 0-10</label>
+                    <input id="editVitaminC" type="number" min="0" max="10" />
+                  </div>
+                  <div>
+                    <label for="editSugar">Đường tự nhiên 0-10</label>
+                    <input id="editSugar" type="number" min="0" max="10" />
+                  </div>
+                  <div>
+                    <label for="editCalories">Kcal / 100g</label>
+                    <input id="editCalories" type="number" min="0" />
+                  </div>
+                  <div>
+                    <label for="editShelfLife">Bảo quản tốt (ngày)</label>
+                    <input id="editShelfLife" type="number" min="0" />
+                  </div>
+                  <div>
+                    <label for="editTexture">Kết cấu</label>
+                    <input id="editTexture" placeholder="giòn, mềm, mọng..." />
+                  </div>
+                </div>
+                <label for="editColor">Màu sắc</label>
+                <input id="editColor" />
+              </div>
+
+              <div class="form-section">
+                <div class="section-label">
+                  <h3>Nội dung chatbot dùng để tư vấn</h3>
+                </div>
+                <div class="smart-toolbar">
+                  <button id="smartDraftBtn" class="secondary" type="button">Tạo mô tả thông minh</button>
+                  <button id="smartUseBtn" class="secondary" type="button">Gợi ý cách dùng</button>
+                  <button id="resetEditorBtn" class="secondary" type="button">Khôi phục</button>
+                </div>
+                <label for="editBestUse">Gợi ý sử dụng</label>
+                <input id="editBestUse" />
+                <div id="bestUseHint" class="field-hint"></div>
+                <label for="editDescription">Mô tả sản phẩm</label>
+                <textarea id="editDescription"></textarea>
+                <div id="descriptionHint" class="field-hint"></div>
+              </div>
               <div class="row" style="margin-top: 14px;">
                 <button type="submit">Lưu thay đổi</button>
                 <button id="clearEditorBtn" class="secondary" type="button">Bỏ chọn</button>
@@ -1069,14 +1582,39 @@ ADMIN_HTML = """<!doctype html>
                 <span id="previewEmoji" class="emoji">🍊</span>
                 <strong id="previewName">Sản phẩm</strong>
                 <p id="previewMeta">Nguồn gốc và mùa vụ</p>
+                <div class="taste-radar">
+                  <div class="radar-chip"><b id="radarSweet">0</b><span>ngọt</span></div>
+                  <div class="radar-chip"><b id="radarJuicy">0</b><span>mọng</span></div>
+                  <div class="radar-chip"><b id="radarAroma">0</b><span>thơm</span></div>
+                </div>
               </div>
               <div class="form-panel">
                 <h2>Hồ sơ hương vị</h2>
                 <div class="taste-list">
                   <div class="taste-row"><span><b>Ngọt</b><b id="sweetValue">0/10</b></span><div class="bar"><i id="sweetBar"></i></div></div>
                   <div class="taste-row"><span><b>Chua</b><b id="sourValue">0/10</b></span><div class="bar"><i id="sourBar"></i></div></div>
+                  <div class="taste-row"><span><b>Ít hạt</b><b id="seedValue">0/10</b></span><div class="bar"><i id="seedBar"></i></div></div>
                   <div class="taste-row"><span><b>Mọng nước</b><b id="juicyValue">0/10</b></span><div class="bar"><i id="juicyBar"></i></div></div>
                   <div class="taste-row"><span><b>Thơm</b><b id="aromaValue">0/10</b></span><div class="bar"><i id="aromaBar"></i></div></div>
+                </div>
+              </div>
+              <div class="form-panel smart-panel">
+                <h2>Gợi ý chất lượng dữ liệu</h2>
+                <div class="smart-score">
+                  <div>
+                    <b>Mức sẵn sàng tư vấn</b>
+                    <p class="muted">Dựa trên giá, mô tả, hương vị và thông tin bán hàng.</p>
+                  </div>
+                  <strong id="profileScore">0%</strong>
+                </div>
+                <ul id="smartWarnings" class="smart-list"></ul>
+                <div>
+                  <h3 style="margin-bottom: 8px;">Trường đã đổi</h3>
+                  <div id="changedFields" class="changed-fields"></div>
+                </div>
+                <div>
+                  <h3 style="margin-bottom: 8px;">Câu tư vấn dự kiến</h3>
+                  <p id="chatbotSummary" class="admin-summary"></p>
                 </div>
               </div>
             </aside>
@@ -1143,18 +1681,88 @@ ADMIN_HTML = """<!doctype html>
     const editorWrap = document.querySelector("#editorWrap");
     let products = [];
     let selectedProductId = null;
+    let selectedOriginal = null;
 
     const fields = {
       name: document.querySelector("#editName"),
+      category: document.querySelector("#editCategory"),
       price: document.querySelector("#editPrice"),
       origin: document.querySelector("#editOrigin"),
       season: document.querySelector("#editSeason"),
       sweetness_level: document.querySelector("#editSweet"),
       sourness_level: document.querySelector("#editSour"),
+      seed_level: document.querySelector("#editSeed"),
       juiciness_level: document.querySelector("#editJuicy"),
       aroma_level: document.querySelector("#editAroma"),
+      crunchiness_level: document.querySelector("#editCrunch"),
+      fiber_level: document.querySelector("#editFiber"),
+      vitamin_c_level: document.querySelector("#editVitaminC"),
+      sugar_content_level: document.querySelector("#editSugar"),
+      calories_per_100g: document.querySelector("#editCalories"),
+      shelf_life_days: document.querySelector("#editShelfLife"),
+      texture: document.querySelector("#editTexture"),
+      color: document.querySelector("#editColor"),
       best_use: document.querySelector("#editBestUse"),
       description: document.querySelector("#editDescription"),
+    };
+
+    const numericFields = new Set([
+      "price",
+      "sweetness_level",
+      "sourness_level",
+      "seed_level",
+      "juiciness_level",
+      "aroma_level",
+      "crunchiness_level",
+      "fiber_level",
+      "vitamin_c_level",
+      "sugar_content_level",
+      "calories_per_100g",
+      "shelf_life_days",
+    ]);
+
+    const levelFields = new Set([
+      "sweetness_level",
+      "sourness_level",
+      "seed_level",
+      "juiciness_level",
+      "aroma_level",
+      "crunchiness_level",
+      "fiber_level",
+      "vitamin_c_level",
+      "sugar_content_level",
+    ]);
+
+    const fieldLabels = {
+      name: "Tên",
+      category: "Nhóm",
+      price: "Giá",
+      origin: "Nguồn gốc",
+      season: "Mùa vụ",
+      sweetness_level: "Ngọt",
+      sourness_level: "Chua",
+      seed_level: "Hạt",
+      juiciness_level: "Mọng nước",
+      aroma_level: "Thơm",
+      crunchiness_level: "Giòn",
+      fiber_level: "Chất xơ",
+      vitamin_c_level: "Vitamin C",
+      sugar_content_level: "Đường",
+      calories_per_100g: "Kcal",
+      shelf_life_days: "Bảo quản",
+      texture: "Kết cấu",
+      color: "Màu",
+      best_use: "Gợi ý dùng",
+      description: "Mô tả",
+    };
+
+    const sensoryOutputs = {
+      sweetness_level: document.querySelector("#editSweetOut"),
+      sourness_level: document.querySelector("#editSourOut"),
+      seed_level: document.querySelector("#editSeedOut"),
+      juiciness_level: document.querySelector("#editJuicyOut"),
+      aroma_level: document.querySelector("#editAromaOut"),
+      crunchiness_level: document.querySelector("#editCrunchOut"),
     };
 
     const fruitEmojiMap = [
@@ -1181,6 +1789,32 @@ ADMIN_HTML = """<!doctype html>
 
     function formatNumber(value) {
       return new Intl.NumberFormat("vi-VN").format(value);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function clampLevel(value) {
+      const number = Number(value || 0);
+      if (!Number.isFinite(number)) return 0;
+      return Math.max(0, Math.min(10, Math.round(number)));
+    }
+
+    function cleanNumber(value) {
+      const number = Number(value || 0);
+      return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+    }
+
+    function valueForField(fieldName, value) {
+      if (levelFields.has(fieldName)) return clampLevel(value);
+      if (numericFields.has(fieldName)) return cleanNumber(value);
+      return String(value ?? "").trim();
     }
 
     function token() {
@@ -1270,27 +1904,22 @@ ADMIN_HTML = """<!doctype html>
       selectedProductId = Number(productId);
       const product = products.find((item) => item.id === selectedProductId);
       if (!product) return;
+      selectedOriginal = { ...product };
 
       editorEmpty.classList.add("hidden");
       editorWrap.classList.remove("hidden");
-      fields.name.value = product.name;
-      fields.price.value = product.price;
-      fields.origin.value = product.origin;
-      fields.season.value = product.season;
-      fields.sweetness_level.value = product.sweetness_level;
-      fields.sourness_level.value = product.sourness_level;
-      fields.juiciness_level.value = product.juiciness_level;
-      fields.aroma_level.value = product.aroma_level;
-      fields.best_use.value = product.best_use;
-      fields.description.value = product.description;
+      for (const [fieldName, input] of Object.entries(fields)) {
+        input.value = product[fieldName] ?? "";
+      }
       setStatus(editStatus, "");
-      updatePreview();
+      updateEditorIntelligence();
       renderProducts();
       switchSection("editorSection");
     }
 
     function clearEditor() {
       selectedProductId = null;
+      selectedOriginal = null;
       editorWrap.classList.add("hidden");
       editorEmpty.classList.remove("hidden");
       setStatus(editStatus, "");
@@ -1302,20 +1931,205 @@ ADMIN_HTML = """<!doctype html>
       document.querySelector(`#${id}`).style.setProperty("--value", `${percent}%`);
     }
 
+    function updateRangeControl(fieldName) {
+      const input = fields[fieldName];
+      if (!input || !input.classList.contains("smart-range")) return;
+      const value = clampLevel(input.value);
+      input.value = value;
+      input.style.setProperty("--range", `${value * 10}%`);
+      if (sensoryOutputs[fieldName]) sensoryOutputs[fieldName].textContent = `${value}/10`;
+    }
+
+    function collectFormPayload() {
+      const payload = {};
+      for (const [fieldName, input] of Object.entries(fields)) {
+        payload[fieldName] = valueForField(fieldName, input.value);
+      }
+      return payload;
+    }
+
+    function getChangedPayload() {
+      if (!selectedOriginal) return {};
+      const current = collectFormPayload();
+      const changed = {};
+      for (const [fieldName, value] of Object.entries(current)) {
+        const originalValue = valueForField(fieldName, selectedOriginal[fieldName]);
+        if (value !== originalValue) changed[fieldName] = value;
+      }
+      return changed;
+    }
+
+    function tasteNotes(product) {
+      const notes = [];
+      if (product.sweetness_level >= 8) notes.push("ngọt đậm");
+      else if (product.sweetness_level >= 6) notes.push("ngọt vừa");
+      else notes.push("ngọt nhẹ");
+
+      if (product.sourness_level <= 2) notes.push("ít chua");
+      else if (product.sourness_level >= 6) notes.push("chua rõ");
+      else notes.push("chua nhẹ");
+
+      if (product.juiciness_level >= 8) notes.push("mọng nước");
+      if (product.aroma_level >= 7) notes.push("thơm");
+      if (product.crunchiness_level >= 7) notes.push("giòn");
+      if (product.seed_level <= 2) notes.push("ít hạt");
+      return notes.slice(0, 5);
+    }
+
+    function suggestBestUse(product) {
+      const uses = ["ăn tươi"];
+      if (product.juiciness_level >= 8) uses.push("ép nước");
+      if (product.sweetness_level >= 8 && product.aroma_level >= 6) uses.push("làm sinh tố");
+      if (product.crunchiness_level >= 7) uses.push("ăn vặt lạnh");
+      if (product.sourness_level >= 6) uses.push("pha đồ uống");
+      if (product.fiber_level >= 7) uses.push("bổ sung chất xơ");
+      if (product.sugar_content_level <= 4 && product.calories_per_100g <= 60) uses.push("thực đơn nhẹ");
+      return Array.from(new Set(uses)).slice(0, 4).join(", ");
+    }
+
+    function buildSmartDescription(product) {
+      const notes = tasteNotes(product).join(", ");
+      const origin = product.origin ? ` từ ${product.origin}` : "";
+      const color = product.color ? ` màu ${product.color}` : "";
+      const texture = product.texture ? `, kết cấu ${product.texture}` : "";
+      const storage = product.shelf_life_days ? ` Bảo quản tốt khoảng ${product.shelf_life_days} ngày.` : "";
+      return `${product.name || "Sản phẩm này"}${origin}${color}${texture}, ${notes}. Phù hợp ${product.best_use || suggestBestUse(product)}.${storage}`.replace(/\\s+/g, " ").trim();
+    }
+
     function updatePreview() {
-      const product = products.find((item) => item.id === selectedProductId);
+      const product = selectedProductId ? { ...products.find((item) => item.id === selectedProductId), ...collectFormPayload() } : null;
       if (!product) return;
       document.querySelector("#previewEmoji").textContent = fruitEmoji(product.name);
       document.querySelector("#previewName").textContent = product.name;
       document.querySelector("#previewMeta").textContent = `${product.origin || "Chưa có nguồn gốc"} · ${product.season || "Chưa có mùa vụ"}`;
+      document.querySelector("#radarSweet").textContent = product.sweetness_level;
+      document.querySelector("#radarJuicy").textContent = product.juiciness_level;
+      document.querySelector("#radarAroma").textContent = product.aroma_level;
       document.querySelector("#sweetValue").textContent = `${product.sweetness_level}/10`;
       document.querySelector("#sourValue").textContent = `${product.sourness_level}/10`;
+      document.querySelector("#seedValue").textContent = `${10 - product.seed_level}/10`;
       document.querySelector("#juicyValue").textContent = `${product.juiciness_level}/10`;
       document.querySelector("#aromaValue").textContent = `${product.aroma_level}/10`;
       setBar("sweetBar", product.sweetness_level);
       setBar("sourBar", product.sourness_level);
+      setBar("seedBar", 10 - product.seed_level);
       setBar("juicyBar", product.juiciness_level);
       setBar("aromaBar", product.aroma_level);
+    }
+
+    function validateProductDraft(product) {
+      const warnings = [];
+      const ok = [];
+      let score = 100;
+
+      if (!product.name) {
+        warnings.push("Thiếu tên sản phẩm.");
+        score -= 22;
+      }
+      if (!product.price) {
+        warnings.push("Giá bán đang bằng 0, chatbot sẽ tư vấn kém tin cậy.");
+        score -= 16;
+      }
+      if (!product.origin) {
+        warnings.push("Thiếu nguồn gốc.");
+        score -= 9;
+      }
+      if (!product.season) {
+        warnings.push("Thiếu mùa vụ.");
+        score -= 7;
+      }
+      if (!product.best_use || product.best_use.length < 8) {
+        warnings.push("Gợi ý sử dụng còn quá ngắn.");
+        score -= 10;
+      }
+      if (!product.description || product.description.length < 45) {
+        warnings.push("Mô tả nên có ít nhất 45 ký tự để chatbot có ngữ cảnh.");
+        score -= 16;
+      }
+      if (!product.texture) {
+        warnings.push("Thiếu kết cấu: giòn, mềm, mọng, chắc...");
+        score -= 6;
+      }
+      if (!product.color) {
+        warnings.push("Thiếu màu sắc.");
+        score -= 5;
+      }
+
+      const tasteTotal = product.sweetness_level + product.sourness_level + product.juiciness_level + product.aroma_level;
+      if (tasteTotal <= 4) {
+        warnings.push("Các chỉ số hương vị đang quá thấp, kiểm tra lại trước khi lưu.");
+        score -= 12;
+      }
+
+      if (warnings.length === 0) ok.push("Hồ sơ đủ tốt để chatbot tư vấn rõ ràng.");
+      if (product.sugar_content_level <= 4) ok.push("Có thể dùng cho khách hỏi lựa chọn ít đường.");
+      if (product.vitamin_c_level >= 7) ok.push("Có dữ liệu tốt cho câu hỏi về vitamin C.");
+      if (product.seed_level <= 2) ok.push("Có thể gợi ý cho trẻ em hoặc khách thích ít hạt.");
+
+      return { score: Math.max(0, Math.min(100, score)), warnings, ok };
+    }
+
+    function renderSmartWarnings(result) {
+      const list = document.querySelector("#smartWarnings");
+      list.innerHTML = "";
+      const items = result.warnings.length
+        ? result.warnings.map((text) => ({ text, cls: "warn" }))
+        : result.ok.map((text) => ({ text, cls: "ok" }));
+
+      for (const item of items.slice(0, 5)) {
+        const node = document.createElement("li");
+        node.className = item.cls;
+        node.textContent = item.text;
+        list.appendChild(node);
+      }
+    }
+
+    function updateChangedFields() {
+      const changed = getChangedPayload();
+      const names = Object.keys(changed);
+      document.querySelector("#dirtyCount").textContent = `${names.length} thay đổi`;
+      const wrap = document.querySelector("#changedFields");
+      wrap.innerHTML = "";
+      if (!names.length) {
+        const node = document.createElement("span");
+        node.className = "pill";
+        node.textContent = "Chưa có thay đổi";
+        wrap.appendChild(node);
+        return changed;
+      }
+
+      for (const fieldName of names) {
+        const node = document.createElement("span");
+        node.className = "pill";
+        node.textContent = fieldLabels[fieldName] || fieldName;
+        wrap.appendChild(node);
+      }
+      return changed;
+    }
+
+    function updateEditorIntelligence() {
+      if (!selectedProductId) return;
+      const product = { ...products.find((item) => item.id === selectedProductId), ...collectFormPayload() };
+      for (const [fieldName, input] of Object.entries(fields)) {
+        input.classList.remove("field-invalid");
+        if (levelFields.has(fieldName)) {
+          input.value = clampLevel(input.value);
+          updateRangeControl(fieldName);
+        }
+      }
+      fields.name.classList.toggle("field-invalid", !product.name);
+      fields.price.classList.toggle("field-invalid", !product.price);
+      fields.description.classList.toggle("field-invalid", !product.description || product.description.length < 45);
+      fields.best_use.classList.toggle("field-invalid", !product.best_use || product.best_use.length < 8);
+
+      const result = validateProductDraft(product);
+      document.querySelector("#profileScore").textContent = `${result.score}%`;
+      renderSmartWarnings(result);
+      updateChangedFields();
+      document.querySelector("#bestUseHint").textContent = product.best_use ? "" : `Gợi ý: ${suggestBestUse(product)}`;
+      document.querySelector("#descriptionHint").textContent = `${product.description.length}/45 ký tự tối thiểu khuyến nghị`;
+      document.querySelector("#chatbotSummary").textContent = buildSmartDescription(product);
+      updatePreview();
     }
 
     function renderProducts() {
@@ -1329,8 +2143,8 @@ ADMIN_HTML = """<!doctype html>
             <div class="product-name">
               <div class="fruit-avatar">${fruitEmoji(product.name)}</div>
               <div>
-                <strong>${product.name}</strong>
-                <div class="muted">${product.origin || ""} ${product.season ? "· " + product.season : ""}</div>
+                <strong>${escapeHtml(product.name)}</strong>
+                <div class="muted">${escapeHtml(product.origin || "")} ${product.season ? "· " + escapeHtml(product.season) : ""}</div>
               </div>
             </div>
           </td>
@@ -1363,7 +2177,11 @@ ADMIN_HTML = """<!doctype html>
         const payload = await requestJson(`/products?${params.toString()}`);
         products = payload.items;
         renderProducts();
-        if (selectedProductId) updatePreview();
+        if (selectedProductId) {
+          const selected = products.find((item) => item.id === selectedProductId);
+          if (selected && !selectedOriginal) selectedOriginal = { ...selected };
+          if (selected) updateEditorIntelligence();
+        }
         setStatus(stockStatus, `Đã tải ${payload.items.length} sản phẩm.`, "ok");
       } catch (error) {
         setStatus(stockStatus, error.message, "error");
@@ -1408,18 +2226,18 @@ ADMIN_HTML = """<!doctype html>
         return;
       }
 
-      const payload = {
-        name: fields.name.value.trim(),
-        price: Number(fields.price.value || 0),
-        origin: fields.origin.value.trim(),
-        season: fields.season.value.trim(),
-        sweetness_level: Number(fields.sweetness_level.value || 0),
-        sourness_level: Number(fields.sourness_level.value || 0),
-        juiciness_level: Number(fields.juiciness_level.value || 0),
-        aroma_level: Number(fields.aroma_level.value || 0),
-        best_use: fields.best_use.value.trim(),
-        description: fields.description.value.trim(),
-      };
+      updateEditorIntelligence();
+      const fullPayload = collectFormPayload();
+      if (!fullPayload.name) {
+        setStatus(editStatus, "Tên sản phẩm không được để trống.", "error");
+        return;
+      }
+
+      const payload = getChangedPayload();
+      if (!Object.keys(payload).length) {
+        setStatus(editStatus, "Không có thay đổi mới để lưu.", "ok");
+        return;
+      }
 
       setStatus(editStatus, "Đang lưu thông tin sản phẩm...");
       try {
@@ -1430,8 +2248,9 @@ ADMIN_HTML = """<!doctype html>
         });
         const index = products.findIndex((item) => item.id === response.product.id);
         if (index >= 0) products[index] = response.product;
+        selectedOriginal = { ...response.product };
         renderProducts();
-        updatePreview();
+        updateEditorIntelligence();
         await loadAudit();
         const message = response.changed_fields.length
           ? `Đã lưu: ${response.changed_fields.join(", ")}`
@@ -1440,6 +2259,86 @@ ADMIN_HTML = """<!doctype html>
       } catch (error) {
         setStatus(editStatus, error.message, "error");
       }
+    }
+
+    function applyTastePreset(preset) {
+      const presets = {
+        sweet: {
+          sweetness_level: 9,
+          sourness_level: 2,
+          juiciness_level: 7,
+          aroma_level: 8,
+          sugar_content_level: 8,
+        },
+        balanced: {
+          sweetness_level: 7,
+          sourness_level: 3,
+          juiciness_level: 7,
+          aroma_level: 6,
+          sugar_content_level: 6,
+        },
+        juicy: {
+          sweetness_level: 7,
+          sourness_level: 3,
+          juiciness_level: 9,
+          aroma_level: 7,
+          texture: "mọng nước",
+        },
+        diet: {
+          sweetness_level: 5,
+          sourness_level: 2,
+          sugar_content_level: 3,
+          calories_per_100g: 45,
+          fiber_level: 7,
+        },
+        crisp: {
+          sweetness_level: 7,
+          sourness_level: 2,
+          juiciness_level: 6,
+          crunchiness_level: 9,
+          texture: "giòn",
+        },
+      };
+
+      const values = presets[preset];
+      if (!values) return;
+      for (const [fieldName, value] of Object.entries(values)) {
+        if (fields[fieldName]) fields[fieldName].value = value;
+      }
+      updateEditorIntelligence();
+      setStatus(editStatus, "Đã áp dụng preset hương vị. Kiểm tra lại trước khi lưu.", "ok");
+    }
+
+    function applySmartBestUse() {
+      if (!selectedProductId) return;
+      const product = collectFormPayload();
+      fields.best_use.value = suggestBestUse(product);
+      updateEditorIntelligence();
+      setStatus(editStatus, "Đã tạo gợi ý sử dụng từ hồ sơ hương vị.", "ok");
+    }
+
+    function applySmartDraft() {
+      if (!selectedProductId) return;
+      const product = collectFormPayload();
+      if (!product.best_use) {
+        product.best_use = suggestBestUse(product);
+        fields.best_use.value = product.best_use;
+      }
+      fields.description.value = buildSmartDescription(product);
+      if (!fields.texture.value.trim()) {
+        fields.texture.value = product.crunchiness_level >= 7 ? "giòn" : product.juiciness_level >= 8 ? "mọng nước" : "mềm";
+      }
+      updateEditorIntelligence();
+      setStatus(editStatus, "Đã tạo mô tả thông minh. Bạn có thể chỉnh câu chữ trước khi lưu.", "ok");
+    }
+
+    function resetEditorToOriginal() {
+      if (!selectedOriginal) return;
+      for (const [fieldName, input] of Object.entries(fields)) {
+        input.value = selectedOriginal[fieldName] ?? "";
+      }
+      updateEditorIntelligence();
+      setStatus(editStatus, "Đã khôi phục dữ liệu ban đầu của sản phẩm đang chọn.", "ok");
     }
 
     function operationText(operation) {
@@ -1466,12 +2365,12 @@ ADMIN_HTML = """<!doctype html>
           const node = document.createElement("article");
           node.className = "audit-item";
           node.innerHTML = `
-            <strong>${fruitEmoji(item.product_name)} ${item.product_name || "Sản phẩm #" + item.product_id}</strong>
-            <div>${operationText(item.operation)}</div>
+            <strong>${fruitEmoji(item.product_name)} ${escapeHtml(item.product_name || "Sản phẩm #" + item.product_id)}</strong>
+            <div>${escapeHtml(operationText(item.operation))}</div>
             <div class="audit-meta">
               <span class="pill">Delta ${item.quantity_delta}</span>
               <span class="pill">Tồn ${item.new_stock}</span>
-              <span class="pill">${item.actor}</span>
+              <span class="pill">${escapeHtml(item.actor)}</span>
             </div>
             <p class="muted" style="margin-top: 10px;">${new Date(item.created_at).toLocaleString("vi-VN")}</p>
           `;
@@ -1534,10 +2433,10 @@ ADMIN_HTML = """<!doctype html>
           const confidence = item.confidence === null || item.confidence === undefined ? "-" : Number(item.confidence).toFixed(2);
           row.innerHTML = `
             <td>${item.timestamp ? new Date(item.timestamp).toLocaleString("vi-VN") : "-"}</td>
-            <td>${item.intent || "-"}</td>
-            <td><span class="pill">${item.reason || "-"}</span></td>
+            <td>${escapeHtml(item.intent || "-")}</td>
+            <td><span class="pill">${escapeHtml(item.reason || "-")}</span></td>
             <td>${confidence}</td>
-            <td>${item.question || ""}</td>
+            <td>${escapeHtml(item.question || "")}</td>
           `;
           routingBody.appendChild(row);
         }
@@ -1545,7 +2444,7 @@ ADMIN_HTML = """<!doctype html>
         const sampleCount = (payload.no_match_samples || []).length;
         setStatus(
           routingStatus,
-          `Đã tải ${formatNumber(payload.total || 0)} bản ghi; hiển thị ${formatNumber(sampleCount)} mẫu no_match gần nhất.",
+          `Đã tải ${formatNumber(payload.total || 0)} bản ghi; hiển thị ${formatNumber(sampleCount)} mẫu no_match gần nhất.`,
           "ok"
         );
       } catch (error) {
@@ -1568,9 +2467,18 @@ ADMIN_HTML = """<!doctype html>
     document.querySelector("#refreshBtn").addEventListener("click", loadProducts);
     document.querySelector("#productForm").addEventListener("submit", saveProduct);
     document.querySelector("#clearEditorBtn").addEventListener("click", clearEditor);
+    document.querySelector("#smartDraftBtn").addEventListener("click", applySmartDraft);
+    document.querySelector("#smartUseBtn").addEventListener("click", applySmartBestUse);
+    document.querySelector("#resetEditorBtn").addEventListener("click", resetEditorToOriginal);
     document.querySelector("#auditBtn").addEventListener("click", loadAudit);
     document.querySelector("#routingBtn").addEventListener("click", loadRoutingInsights);
     document.querySelector("#backToProductsBtn").addEventListener("click", () => switchSection("productsSection"));
+    for (const input of Object.values(fields)) {
+      input.addEventListener("input", updateEditorIntelligence);
+    }
+    document.querySelectorAll("[data-preset]").forEach((button) => {
+      button.addEventListener("click", () => applyTastePreset(button.dataset.preset));
+    });
     searchInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") loadProducts();
     });

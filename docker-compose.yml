@@ -1,26 +1,4 @@
 services:
-  admin-service:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: fruit-store-admin-service
-    command: ["uvicorn", "backend.admin_main:app", "--host", "0.0.0.0", "--port", "8000"]
-    environment:
-      DATABASE_URL: sqlite:///./backend/data/fruit_chatbot.db
-      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-change-me}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
-      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-30}
-      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
-      CORS_ORIGINS: '["*"]'
-      ENABLE_USER_QUERY_LOGGING: "false"
-      ENABLE_QA_PAIR_LOGGING: "false"
-      ENABLE_ANSWER_QUALITY_REVIEW: "false"
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend/data:/app/backend/data
-
   chatbot-service:
     build:
       context: .
@@ -41,12 +19,6 @@ services:
       USE_PRETRAINED_RERANKER: ${USE_PRETRAINED_RERANKER:-true}
       PRETRAINED_RERANKER_MODEL_NAME: ${PRETRAINED_RERANKER_MODEL_NAME:-BAAI/bge-reranker-v2-m3}
       RERANKER_CANDIDATE_POOL: ${RERANKER_CANDIDATE_POOL:-30}
-      RESPONSE_GENERATION_MODE: ${RESPONSE_GENERATION_MODE:-lm_studio}
-      ENABLE_LLM_RESPONSE_REWRITE: ${ENABLE_LLM_RESPONSE_REWRITE:-true}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME:-gemini-2.5-flash}
-      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-6.0}
-      GEMINI_TEMPERATURE: ${GEMINI_TEMPERATURE:-0.2}
       LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
       LM_STUDIO_MODEL_NAME: ${LM_STUDIO_MODEL_NAME:-}
       LM_STUDIO_TIMEOUT_SECONDS: ${LM_STUDIO_TIMEOUT_SECONDS:-15.0}
@@ -55,13 +27,13 @@ services:
       USER_QUERY_LOG_PATH: ${USER_QUERY_LOG_PATH:-ai_log/user_questions.jsonl}
       ENABLE_QA_PAIR_LOGGING: ${ENABLE_QA_PAIR_LOGGING:-true}
       QA_PAIR_LOG_PATH: ${QA_PAIR_LOG_PATH:-ai_log/qa_pairs.jsonl}
-      ENABLE_ANSWER_QUALITY_REVIEW: ${ENABLE_ANSWER_QUALITY_REVIEW:-true}
       FACEBOOK_VERIFY_TOKEN: ${FACEBOOK_VERIFY_TOKEN:-}
       FACEBOOK_PAGE_ACCESS_TOKEN: ${FACEBOOK_PAGE_ACCESS_TOKEN:-}
       FACEBOOK_PAGE_ID: ${FACEBOOK_PAGE_ID:-me}
       FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET:-}
       FACEBOOK_GRAPH_API_VERSION: ${FACEBOOK_GRAPH_API_VERSION:-v22.0}
       FACEBOOK_REQUEST_TIMEOUT_SECONDS: ${FACEBOOK_REQUEST_TIMEOUT_SECONDS:-8.0}
+      FACEBOOK_PRODUCT_IMAGE_BASE_URL: ${FACEBOOK_PRODUCT_IMAGE_BASE_URL:-}
     ports:
       - "8001:8000"
     volumes:

@@ -30,12 +30,6 @@ class Settings(BaseSettings):
     use_pretrained_reranker: bool = True
     pretrained_reranker_model_name: str = "BAAI/bge-reranker-v2-m3"
     reranker_candidate_pool: int = 30
-    response_generation_mode: str = "lm_studio"
-    enable_llm_response_rewrite: bool = True
-    gemini_api_key: str = ""
-    gemini_model_name: str = "gemini-1.5-flash"
-    gemini_timeout_seconds: float = 6.0
-    gemini_temperature: float = 0.2
     lm_studio_base_url: str = "http://localhost:1234/v1"
     lm_studio_model_name: str = ""
     lm_studio_timeout_seconds: float = 15.0
@@ -44,13 +38,13 @@ class Settings(BaseSettings):
     user_query_log_path: str = "ai_log/user_questions.jsonl"
     enable_qa_pair_logging: bool = True
     qa_pair_log_path: str = "ai_log/qa_pairs.jsonl"
-    enable_answer_quality_review: bool = True
     facebook_verify_token: str = ""
     facebook_page_access_token: str = ""
     facebook_page_id: str = "me"
     facebook_app_secret: str = ""
     facebook_graph_api_version: str = "v22.0"
     facebook_request_timeout_seconds: float = 8.0
+    facebook_product_image_base_url: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -34,6 +34,12 @@ class ServiceFactory:
         retriever.rebuild_index(db)
 
         memory_agent = MemoryAgent()
+        response_rewriter = ResponseRewriter(
+            lm_studio_base_url=settings.lm_studio_base_url,
+            lm_studio_model_name=settings.lm_studio_model_name,
+            lm_studio_timeout_seconds=settings.lm_studio_timeout_seconds,
+            lm_studio_temperature=settings.lm_studio_temperature,
+        )
         return ServiceContainer(
             router_agent=RouterAgent(
                 use_pretrained_router=settings.use_pretrained_intent_router,
@@ -45,21 +51,10 @@ class ServiceFactory:
             ),
             inventory_agent=InventoryAgent(),
             recommendation_agent=RecommendationAgent(),
-            faq_agent=FAQAgent(retriever),
+            faq_agent=FAQAgent(retriever, delivery_area_resolver=response_rewriter.resolve_delivery_area),
             memory_agent=memory_agent,
             retriever=retriever,
-            response_rewriter=ResponseRewriter(
-                generation_mode=settings.response_generation_mode,
-                llm_enabled=settings.enable_llm_response_rewrite,
-                gemini_api_key=settings.gemini_api_key,
-                gemini_model_name=settings.gemini_model_name,
-                gemini_timeout_seconds=settings.gemini_timeout_seconds,
-                gemini_temperature=settings.gemini_temperature,
-                lm_studio_base_url=settings.lm_studio_base_url,
-                lm_studio_model_name=settings.lm_studio_model_name,
-                lm_studio_timeout_seconds=settings.lm_studio_timeout_seconds,
-                lm_studio_temperature=settings.lm_studio_temperature,
-            ),
+            response_rewriter=response_rewriter,
             inventory_revision=get_latest_inventory_event_id(db),
         )
 
