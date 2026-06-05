@@ -42,6 +42,7 @@ REFERENTIAL_QUERY_KEYWORDS: tuple[str, ...] = (
 
 
 def _build_router_message(*, user_message: str, session_id: str, db: Session) -> str:
+    """Add recent user context when the message refers to a previous product."""
     normalized = normalize_text(user_message)
     if not any(keyword in normalized for keyword in REFERENTIAL_QUERY_KEYWORDS):
         return user_message
@@ -58,6 +59,7 @@ def _build_router_message(*, user_message: str, session_id: str, db: Session) ->
 
 
 def _citations_from_results(results: list[dict], source_type: str) -> list[CitationOut]:
+    """Convert retriever rows into API citation objects."""
     citations: list[CitationOut] = []
     for item in results:
         citations.append(
@@ -80,6 +82,7 @@ def _extract_question_entities(user_message: str) -> list[str]:
 
 
 def _extract_answer_prices(answer: str) -> list[int]:
+    """Extract VND-like prices from generated text for safety validation."""
     prices: list[int] = []
     for match in re.finditer(r"(\d{1,3}(?:[\.\s]\d{3})+|\d+)\s*(đ|d|vnd|k)", answer.lower()):
         raw_value = re.sub(r"[^\d]", "", match.group(1))
@@ -107,6 +110,7 @@ def _sanitize_answer_output(answer: str) -> str:
 
 
 def _build_safe_recommendation_answer(*, products: list[Product], constraints: dict) -> str:
+    """Build a deterministic recommendation answer when model text needs repair."""
     if not products:
         return "Mình chưa tìm được sản phẩm khớp đúng tiêu chí hiện tại của bạn."
 
@@ -130,6 +134,7 @@ def _build_safe_recommendation_answer(*, products: list[Product], constraints: d
 
 
 def _detect_question_focuses(user_message: str) -> set[str]:
+    """Identify which product facts the user is asking about."""
     normalized = normalize_text(user_message)
     focuses: set[str] = set()
 
@@ -150,6 +155,7 @@ def _detect_question_focuses(user_message: str) -> set[str]:
 
 
 def _build_inventory_answer(*, user_message: str, products: list[Product]) -> str:
+    """Answer stock/price questions with only database-backed product facts."""
     if not products:
         return "Mình chưa tìm thấy sản phẩm bạn hỏi hoặc sản phẩm đang tạm hết hàng."
 
@@ -211,6 +217,7 @@ def _build_greeting_answer(*, products: list[Product]) -> str:
 
 
 def _looks_like_total_cost_question(user_message: str) -> bool:
+    """Detect questions that ask for a cart or order total."""
     normalized = normalize_text(user_message)
     return any(
         keyword in normalized
@@ -228,6 +235,7 @@ def _looks_like_total_cost_question(user_message: str) -> bool:
 
 
 def _looks_like_cart_quantity_question(user_message: str, quantity_items: list[tuple[str, int]]) -> bool:
+    """Detect quantity lists even when the user does not explicitly say total."""
     if not quantity_items:
         return False
 
@@ -251,6 +259,7 @@ def _looks_like_cart_quantity_question(user_message: str, quantity_items: list[t
 
 
 def _extract_quantity_items(user_message: str) -> list[tuple[str, int]]:
+    """Extract fruit alias and quantity pairs for cart-total answers."""
     normalized = normalize_text(user_message)
     found: list[tuple[str, int]] = []
     seen_aliases: set[str] = set()
@@ -281,6 +290,7 @@ def _build_total_cost_answer(
     inventory_agent,
     db: Session,
 ) -> tuple[str, list[Product], bool]:
+    """Resolve quantities to products and calculate an order subtotal."""
     if not _looks_like_total_cost_question(user_message) and not _looks_like_cart_quantity_question(
         user_message,
         quantity_items,
@@ -335,6 +345,7 @@ def _validate_and_repair_answer(
     products: list[Product],
     constraints: dict,
 ) -> tuple[str, list[Product], bool]:
+    """Guard final text against wrong entities, budgets, or off-query products."""
     repaired = False
     fixed_answer = _sanitize_answer_output(answer)
     normalized_answer = normalize_text(fixed_answer)
@@ -398,6 +409,7 @@ def _join_human_list(items: list[str]) -> str:
 
 
 def _build_rag_context_for_rewrite(*, citations: list[CitationOut], products: list[Product]) -> list[str]:
+    """Create short grounding facts for LM Studio rewrite prompts."""
     raw_lines: list[str] = []
 
     for citation in citations[:4]:
@@ -433,6 +445,7 @@ def _product_matches_requested_entity(product: Product, requested_entities: list
 
 
 def _build_comparison_answer(*, products: list[Product], constraints: dict) -> str:
+    """Compare requested products on price, taste, texture, and stock."""
     if not constraints.get("is_comparison"):
         return ""
 
@@ -487,6 +500,7 @@ def _build_recommendation_answer(
     products: list[Product],
     constraints: dict,
 ) -> str:
+    """Turn ranked products into a concise user-facing recommendation answer."""
     if not products:
         return "Mình chưa tìm được sản phẩm phù hợp. Bạn thử mở rộng tiêu chí nhé."
 
@@ -548,6 +562,7 @@ def _product_taste_brief(product: Product) -> str:
 
 
 def _showcase_score(product: Product, user_message: str) -> float:
+    """Rank catalog display order by query hints plus stock and price."""
     normalized = normalize_text(user_message)
 
     score = (
@@ -574,6 +589,7 @@ def _build_available_products_answer(
     products: list[Product],
     focus_products: list[Product],
 ) -> str:
+    """Build the catalog/list-products answer for chat requests."""
     if not products:
         return "Hiện tại kho tạm hết sản phẩm. Bạn quay lại sau ít phút nhé."
 
@@ -606,6 +622,7 @@ def handle_chat_request(
     db: Session,
     source: str = "/chat",
 ) -> ChatResponse:
+    """Run routing, agent logic, rewriting, logging, and persistence for chat."""
     services = app_state.services
     sync_services_with_inventory(db, services)
     trace_id = str(uuid4())
@@ -841,4 +858,5 @@ def handle_chat_request(
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) -> ChatResponse:
+    """HTTP endpoint wrapper around the shared chat pipeline."""
     return handle_chat_request(payload, app_state=request.app.state, db=db)

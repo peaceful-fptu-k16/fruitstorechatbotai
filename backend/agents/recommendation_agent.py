@@ -17,12 +17,14 @@ FRUIT_ENTITY_ALIASES: tuple[str, ...] = FRUIT_ALIASES
 
 
 class RecommendationAgent:
+    """Ranks products from explicit constraints, remembered preferences, and RAG."""
     @staticmethod
     def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
         return any(keyword in text for keyword in keywords)
 
     @staticmethod
     def _parse_money_value(number_text: str, suffix: Optional[str]) -> Optional[int]:
+        """Convert Vietnamese money shorthand such as 100k or 1 trieu to VND."""
         normalized_number = number_text.replace(",", ".").strip()
         try:
             value = float(normalized_number)
@@ -39,6 +41,7 @@ class RecommendationAgent:
         return int(value)
 
     def _extract_budget_bounds(self, normalized_query: str) -> tuple[Optional[int], Optional[int]]:
+        """Parse min/max budget constraints from the normalized query."""
         range_patterns = (
             r"(?:tu|khoang)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?\s*(?:den|toi|-)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?",
             r"(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?\s*-\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|ngan|trieu)?",
@@ -100,9 +103,11 @@ class RecommendationAgent:
         return min_price, max_price
 
     def _extract_requested_entities(self, normalized_query: str) -> list[str]:
+        """Extract fruit names that should be prioritized in recommendation output."""
         return extract_fruit_aliases(normalized_query, aliases=FRUIT_ENTITY_ALIASES)
 
     def parse_preferences(self, query: str, profile: PreferenceProfile) -> dict:
+        """Translate a user query and session memory into rank/filter constraints."""
         normalized = normalize_text(query)
         requested_entities = self._extract_requested_entities(normalized)
         is_child_context = self._contains_any(normalized, ("cho be", "tre em", "em be", "be an"))
@@ -286,6 +291,7 @@ class RecommendationAgent:
         return self.parse_preferences(query, profile)
 
     def _supports_deep_learning(self, retriever: Any) -> bool:
+        """Detect whether a retriever can provide pretrained semantic scores."""
         if retriever is None:
             return False
 
@@ -296,6 +302,7 @@ class RecommendationAgent:
         return isinstance(embedding_model, SentenceTransformerEmbeddingModel)
 
     def _preference_score(self, product: Product, *, constraints: dict, budget: Optional[int]) -> float:
+        """Compute a deterministic product score from active preference constraints."""
         score_parts: list[float] = []
 
         if constraints["min_sweetness"] is not None:
@@ -410,6 +417,7 @@ class RecommendationAgent:
         budget: Optional[int],
         limit: int,
     ) -> tuple[list[Product], bool, bool]:
+        """Place explicitly requested fruits first, then fill with similar products."""
         if not ranked_products:
             return [], False, False
 
@@ -463,6 +471,7 @@ class RecommendationAgent:
         constraints: dict,
         budget: Optional[int],
     ) -> list[Product]:
+        """Blend semantic retriever scores with deterministic preference scores."""
         if not candidates:
             return []
 
@@ -516,6 +525,7 @@ class RecommendationAgent:
         added_similar_products: bool = False,
         missing_requested_entities: bool = False,
     ) -> str:
+        """Create the explanation text that is later rewritten for users."""
         traits: list[str] = []
         if constraints.get("min_sweetness") is not None:
             traits.append("độ ngọt cao")
@@ -595,6 +605,7 @@ class RecommendationAgent:
         retriever: Optional[Any] = None,
         use_deep_learning: bool = True,
     ) -> tuple[list[Product], str]:
+        """Return ranked products and a grounded reason string for the recommendation."""
         constraints = self._parse_preferences(query, profile)
         min_price = constraints.get("min_price")
         max_price = explicit_budget if explicit_budget is not None else constraints.get("max_price")

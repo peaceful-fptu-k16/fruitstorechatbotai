@@ -7,36 +7,48 @@ type ProductCardProps = {
   variant?: ProductCardVariant;
 };
 
-/* Map tên → emoji đại diện */
 const FRUIT_EMOJI_MAP: [string, string][] = [
-  ["xoài",       "🥭"],
-  ["cam",        "🍊"],
-  ["táo",        "🍎"],
-  ["nho",        "🍇"],
-  ["dâu tây",    "🍓"],
-  ["dâu",        "🍓"],
-  ["chuối",      "🍌"],
-  ["dứa",        "🍍"],
-  ["thơm",       "🍍"],
-  ["mít",        "🌿"],
-  ["bưởi",       "🍋"],
-  ["chanh",      "🍋"],
+  ["xoai", "🥭"],
+  ["cam", "🍊"],
+  ["tao", "🍎"],
+  ["nho", "🍇"],
+  ["dau tay", "🍓"],
+  ["dau", "🍓"],
+  ["chuoi", "🍌"],
+  ["dua", "🍍"],
+  ["thom", "🍍"],
+  ["mit", "🌿"],
+  ["buoi", "🍋"],
+  ["chanh", "🍋"],
   ["thanh long", "🐉"],
-  ["vải",        "🍒"],
-  ["chôm chôm",  "🌺"],
-  ["sapoche",    "🟤"],
-  ["ổi",         "🟢"],
-  ["mận",        "🟣"],
+  ["vai", "🍒"],
+  ["chom chom", "🌺"],
+  ["sapoche", "🟤"],
+  ["oi", "🟢"],
+  ["man", "🟣"],
 ];
 
+/** Normalize Vietnamese fruit names before matching display emoji. */
+function normalizeFruitName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Pick a lightweight emoji thumbnail from the product name. */
 function getFruitEmoji(name: string): string {
-  const lower = name.toLowerCase();
+  const normalizedName = normalizeFruitName(name);
   for (const [key, emoji] of FRUIT_EMOJI_MAP) {
-    if (lower.includes(key)) return emoji;
+    if (normalizedName.includes(key)) return emoji;
   }
   return "🍑";
 }
 
+/** Render one 0-10 product attribute as a bounded progress bar. */
 function AttributeBar({
   label,
   value,
@@ -68,8 +80,9 @@ function AttributeBar({
   );
 }
 
+/** Render a product recommendation card with stock, traits, and price. */
 export function ProductCard({ product, variant = "default" }: ProductCardProps) {
-  const emoji   = getFruitEmoji(product.name);
+  const emoji = getFruitEmoji(product.name);
   const inStock = product.stock > 0;
 
   const recommendationBadge =
@@ -95,9 +108,7 @@ export function ProductCard({ product, variant = "default" }: ProductCardProps) 
             : ""
       }`}
     >
-      {/* Gradient header strip */}
       <div className="relative h-18 bg-gradient-to-br from-mellow via-accent-light to-mellow px-4 py-3">
-        {/* Large fruit emoji */}
         <div className="fruit-emoji absolute -bottom-5 right-3 text-5xl drop-shadow-md">
           {emoji}
         </div>
@@ -113,7 +124,6 @@ export function ProductCard({ product, variant = "default" }: ProductCardProps) 
       </div>
 
       <div className="mt-6 px-4 pb-4 pt-1">
-        {/* Stock badge */}
         <div className="mb-2">
           {inStock ? (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-leaf-light px-2.5 py-0.5 text-xs font-semibold text-leaf">
@@ -128,7 +138,6 @@ export function ProductCard({ product, variant = "default" }: ProductCardProps) 
           )}
         </div>
 
-        {/* Mô tả */}
         <p className="mb-3 line-clamp-2 text-xs leading-relaxed text-ink/60">
           {product.description}
         </p>
@@ -145,7 +154,6 @@ export function ProductCard({ product, variant = "default" }: ProductCardProps) 
           </span>
         </div>
 
-        {/* Attribute bars */}
         <div className="mb-4 space-y-2.5">
           <AttributeBar
             label="Độ ngọt"
@@ -183,7 +191,6 @@ export function ProductCard({ product, variant = "default" }: ProductCardProps) 
           Gợi ý dùng: <span className="font-semibold text-ink/80">{product.best_use}</span>
         </p>
 
-        {/* Price + CTA */}
         <div className="flex items-center justify-between">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-ink/40">Giá bán</p>
@@ -203,4 +210,3 @@ export function ProductCard({ product, variant = "default" }: ProductCardProps) 
     </article>
   );
 }
-

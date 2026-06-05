@@ -6,6 +6,7 @@ type QuickRepliesProps = {
   disabled?: boolean;
 };
 
+/** Render preset chat prompts that submit directly to the chat panel. */
 export function QuickReplies({ options, onPick, disabled }: QuickRepliesProps) {
   return (
     <div className="flex flex-wrap gap-1.5 pb-2 pt-1">

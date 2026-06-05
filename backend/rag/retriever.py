@@ -12,6 +12,7 @@ from backend.rag.vector_store import InMemoryVectorStore, VectorDocument
 
 
 class HybridRetriever:
+    """Product/FAQ retriever with lightweight hashing and optional pretrained rerank."""
     def __init__(self) -> None:
         self.settings = get_settings()
         self.embedding_model = self._build_embedding_model()
@@ -22,9 +23,11 @@ class HybridRetriever:
 
     @property
     def supports_deep_learning(self) -> bool:
+        """Signal whether semantic ranking can use pretrained embeddings."""
         return isinstance(self.embedding_model, SentenceTransformerEmbeddingModel)
 
     def _build_embedding_model(self) -> BaseEmbeddingModel:
+        """Prefer configured embeddings, but keep the app online with hashing fallback."""
         backend = self.settings.embedding_backend.strip().lower()
 
         if backend == "sentence_transformers":
@@ -41,6 +44,7 @@ class HybridRetriever:
         return HashingEmbeddingModel(dim=256)
 
     def _build_reranker(self) -> Optional[BaseReranker]:
+        """Lazily create the cross-encoder reranker when enabled and available."""
         if not self.settings.use_pretrained_reranker:
             return None
 
@@ -54,6 +58,7 @@ class HybridRetriever:
             return None
 
     def _ensure_reranker_loaded(self) -> Optional[BaseReranker]:
+        """Attempt reranker loading once per process to avoid repeated slow failures."""
         if self.reranker is not None:
             return self.reranker
 
@@ -65,6 +70,7 @@ class HybridRetriever:
         return self.reranker
 
     def _rerank_results(self, query: str, results: list[dict], *, top_k: int) -> list[dict]:
+        """Apply cross-encoder scores to the top vector candidates."""
         if self.reranker is None or not results:
             return results[:top_k]
 
@@ -101,6 +107,7 @@ class HybridRetriever:
         return ordered if ordered else results[:top_k]
 
     def rebuild_index(self, db: Session) -> None:
+        """Recreate the in-memory vector index from current products and FAQ rows."""
         self.vector_store.reset()
 
         docs: list[VectorDocument] = []
@@ -136,6 +143,7 @@ class HybridRetriever:
         self.vector_store.add_documents(docs)
 
     def semantic_search(self, query: str, *, top_k: int = 5, scope: Optional[str] = None) -> list[dict]:
+        """Search by vector similarity, then rerank when a reranker is available."""
         reranker = self._ensure_reranker_loaded()
         if reranker is None:
             return self.vector_store.similarity_search(query, top_k=top_k, scope=scope)

@@ -3,7 +3,7 @@ import { Be_Vietnam_Pro, Playfair_Display } from "next/font/google";
 
 import "./globals.css";
 
-/* Be Vietnam Pro – thiết kế riêng cho tiếng Việt */
+// Vietnamese-friendly body font for readable chat and product text.
 const bodyFont = Be_Vietnam_Pro({
   subsets: ["vietnamese", "latin"],
   variable: "--font-body",
@@ -11,7 +11,7 @@ const bodyFont = Be_Vietnam_Pro({
   display: "swap",
 });
 
-/* Playfair Display – tiêu đề sang trọng */
+// Editorial title font used only for larger headings.
 const titleFont = Playfair_Display({
   subsets: ["latin"],
   variable: "--font-title",
@@ -21,7 +21,7 @@ const titleFont = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: "Trái Cây Tươi – Chatbot Tư Vấn Thông Minh",
+  title: "Trái Cây Tươi - Chatbot Tư Vấn Thông Minh",
   description:
     "Chatbot AI tư vấn trái cây tươi theo khẩu vị, tồn kho thời gian thực và ngân sách của bạn.",
 };
@@ -32,7 +32,6 @@ export default function RootLayout({
   return (
     <html lang="vi">
       <body className={`${titleFont.variable} ${bodyFont.variable}`}>
-        {/* Animated background blobs – trang trí nền */}
         <div
           aria-hidden="true"
           className="bg-blob"
@@ -87,4 +86,3 @@ export default function RootLayout({
     </html>
   );
 }
-

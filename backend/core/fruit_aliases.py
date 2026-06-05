@@ -28,6 +28,7 @@ FRUIT_CONTEXT_PREFIX_PATTERN = r"(?:qua|trai)(?:\s+cay)?"
 
 
 def fruit_alias_text_pattern(alias: str) -> str:
+    """Build a strict regex for fruit mentions; short aliases need context."""
     normalized_alias = normalize_text(alias)
     escaped_alias = re.escape(normalized_alias)
 
@@ -38,6 +39,7 @@ def fruit_alias_text_pattern(alias: str) -> str:
 
 
 def fruit_alias_optional_context_pattern(alias: str) -> str:
+    """Build a regex that accepts optional product/fruit context for full names."""
     normalized_alias = normalize_text(alias)
     escaped_alias = re.escape(normalized_alias)
 
@@ -48,6 +50,7 @@ def fruit_alias_optional_context_pattern(alias: str) -> str:
 
 
 def fruit_alias_quantity_pattern(alias: str) -> str:
+    """Build a regex that captures optional quantity near a fruit alias."""
     normalized_alias = normalize_text(alias)
     escaped_alias = re.escape(normalized_alias)
 
@@ -58,10 +61,12 @@ def fruit_alias_quantity_pattern(alias: str) -> str:
 
 
 def fruit_alias_matches_text(alias: str, text: str) -> bool:
+    """Return whether a fruit alias appears with the required context."""
     return re.search(fruit_alias_text_pattern(alias), normalize_text(text)) is not None
 
 
 def extract_fruit_aliases(text: str, aliases: tuple[str, ...] = FRUIT_ALIASES) -> list[str]:
+    """Return normalized fruit aliases mentioned in text, longest names first."""
     normalized_text = normalize_text(text)
     matched: list[str] = []
     seen: set[str] = set()
@@ -83,6 +88,7 @@ def has_fruit_alias(text: str, aliases: tuple[str, ...] = FRUIT_ALIASES) -> bool
 
 
 def has_unqualified_short_alias(text: str) -> bool:
+    """Detect ambiguous bare short aliases such as oi/le without fruit context."""
     normalized_text = normalize_text(text)
     for alias in SHORT_CONTEXTUAL_ALIASES:
         has_bare_alias = re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", normalized_text) is not None

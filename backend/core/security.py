@@ -15,6 +15,7 @@ from backend.core.config import Settings, get_settings
 
 
 class UserContext(BaseModel):
+    """Authenticated admin identity attached to protected requests."""
     sub: str
     role: str
 
@@ -39,6 +40,7 @@ def _sign(data: str, secret: str) -> str:
 def create_access_token(
     payload: Dict[str, Any], settings: Settings, expires_minutes: Optional[int] = None
 ) -> str:
+    """Create a minimal HS256 JWT without introducing a heavy auth dependency."""
     expire_delta = expires_minutes or settings.admin_access_token_expire_minutes
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=expire_delta)
 
@@ -60,6 +62,7 @@ def create_access_token(
 
 
 def decode_access_token(token: str, settings: Settings) -> Dict[str, Any]:
+    """Validate signature/expiry and return decoded token claims."""
     try:
         header_b64, payload_b64, signature_b64 = token.split(".")
         signing_input = f"{header_b64}.{payload_b64}"
@@ -86,6 +89,7 @@ def get_current_admin(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
     settings: Settings = Depends(get_settings),
 ) -> UserContext:
+    """FastAPI dependency that enforces an admin bearer token."""
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

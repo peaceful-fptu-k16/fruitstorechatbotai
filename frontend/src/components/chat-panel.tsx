@@ -9,7 +9,6 @@ import { sendChatMessage } from "@/lib/api-client";
 import { ProductCard } from "./product-card";
 import { QuickReplies } from "./quick-replies";
 
-/* ─── Types ────────────────────────────────────────────── */
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -19,26 +18,25 @@ type ChatMessage = {
   products?: Product[];
 };
 
-/* ─── Quick reply options ─────────────────────────────── */
 type QuickOpt = { label: string; value: string };
+
 const QUICK_OPTIONS: QuickOpt[] = [
-  { label: "🍊 Trái nào ngọt nhất?",       value: "Hôm nay có trái nào ngọt nhất không?" },
-  { label: "🍋 Ít chua dưới 100k",          value: "Gợi ý trái ít chua giá dưới 100 nghìn" },
-  { label: "📦 Cam còn hàng không?",        value: "Cam còn hàng không?" },
-  { label: "🚚 Ship mất bao lâu?",          value: "Ship mất bao lâu?" },
-  { label: "↩️ Chính sách đổi trả",         value: "Chính sách đổi trả như thế nào?" },
-  { label: "🥭 Xoài hôm nay ngon không?",   value: "Xoài hôm nay có gì ngon không?" },
+  { label: "🍊 Trái nào ngọt nhất?", value: "Hôm nay có trái nào ngọt nhất không?" },
+  { label: "🍋 Ít chua dưới 100k", value: "Gợi ý trái ít chua giá dưới 100 nghìn" },
+  { label: "📦 Cam còn hàng không?", value: "Cam còn hàng không?" },
+  { label: "🚚 Ship mất bao lâu?", value: "Ship mất bao lâu?" },
+  { label: "↩️ Chính sách đổi trả", value: "Chính sách đổi trả như thế nào?" },
+  { label: "🥭 Xoài hôm nay ngon không?", value: "Xoài hôm nay có gì ngon không?" },
 ];
 
-/* ─── Intent label map ────────────────────────────────── */
 const INTENT_LABELS: Record<string, { text: string; cls: string }> = {
-  recommendation:   { text: "🎯 Gợi ý",         cls: "bg-accent-light   text-accent" },
-  available_products:{ text: "🛒 Sản phẩm",      cls: "bg-leaf-light     text-leaf"  },
-  inventory_check:  { text: "📦 Tồn kho",        cls: "bg-blue-50        text-blue-600" },
-  faq_shipping:     { text: "🚚 Vận chuyển",     cls: "bg-purple-50      text-purple-600"},
-  faq_return:       { text: "↩️ Đổi trả",         cls: "bg-pink-50        text-pink-600" },
-  faq_storage:      { text: "🧊 Bảo quản",       cls: "bg-yellow-50      text-yellow-700"},
-  fallback:         { text: "💬 Chung",           cls: "bg-gray-100       text-gray-500" },
+  recommendation: { text: "🎯 Gợi ý", cls: "bg-accent-light text-accent" },
+  available_products: { text: "🛒 Sản phẩm", cls: "bg-leaf-light text-leaf" },
+  inventory_check: { text: "📦 Tồn kho", cls: "bg-blue-50 text-blue-600" },
+  faq_shipping: { text: "🚚 Vận chuyển", cls: "bg-purple-50 text-purple-600" },
+  faq_return: { text: "↩️ Đổi trả", cls: "bg-pink-50 text-pink-600" },
+  faq_storage: { text: "🧊 Bảo quản", cls: "bg-yellow-50 text-yellow-700" },
+  fallback: { text: "💬 Chung", cls: "bg-gray-100 text-gray-500" },
 };
 
 const FRUIT_ENTITY_ALIASES: string[] = [
@@ -75,6 +73,7 @@ const FRUIT_ENTITY_DISPLAY: Record<string, string> = {
   dau: "Dâu",
 };
 
+/** Normalize Vietnamese text for lightweight client-side entity matching. */
 function normalizeVi(text: string): string {
   return text
     .toLowerCase()
@@ -85,10 +84,12 @@ function normalizeVi(text: string): string {
     .trim();
 }
 
+/** Escape a string before embedding it in a dynamic RegExp. */
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Extract fruit aliases from the user's latest message. */
 function extractRequestedEntities(message: string): string[] {
   const normalized = normalizeVi(message);
   const found: string[] = [];
@@ -106,11 +107,13 @@ function extractRequestedEntities(message: string): string[] {
   return found;
 }
 
+/** Check whether a rendered product belongs to the requested fruit group. */
 function productMatchesAnyEntity(productName: string, entities: string[]): boolean {
   const normalizedName = normalizeVi(productName);
   return entities.some((entity) => normalizedName.includes(entity));
 }
 
+/** Join labels in a compact human-readable list. */
 function joinHumanList(items: string[]): string {
   if (!items.length) {
     return "";
@@ -121,10 +124,12 @@ function joinHumanList(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} và ${items[items.length - 1]}`;
 }
 
+/** Convert a normalized alias back to a display label. */
 function toEntityDisplayName(entity: string): string {
   return FRUIT_ENTITY_DISPLAY[entity] ?? entity;
 }
 
+/** Render the backend intent and confidence beside assistant replies. */
 function IntentBadge({ intent, confidence }: { intent: string; confidence?: number }) {
   const info = INTENT_LABELS[intent] ?? { text: intent, cls: "bg-gray-100 text-gray-500" };
   return (
@@ -137,14 +142,15 @@ function IntentBadge({ intent, confidence }: { intent: string; confidence?: numb
   );
 }
 
+/** Create a stable browser-side session id for conversation memory. */
 function buildSessionId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return String(Date.now());
 }
 
-/* ─── Main component ──────────────────────────────────── */
+/** Main demo chat experience with transcript, quick replies, and product panel. */
 export function ChatPanel() {
-  const [sessionId, setSessionId] = useState<string>("session-tam");
+  const [sessionId, setSessionId] = useState<string>("session-demo");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
@@ -152,13 +158,13 @@ export function ChatPanel() {
       text: "Xin chào! 👋 Mình là trợ lý tư vấn hoa quả tươi. Bạn muốn tìm trái ngọt, ít chua hay theo ngân sách?",
     },
   ]);
-  const [input, setInput]   = useState("");
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState<string | null>(null);
-  const bottomRef           = useRef<HTMLDivElement>(null);
-  const inputRef            = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Tự cuộn xuống khi có tin nhắn mới
+  // Keep the newest chat turn visible after each message update.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
@@ -228,6 +234,7 @@ export function ChatPanel() {
     productPanelContext.requestedEntities.length > 0 &&
     productPanelContext.focusProducts.length > 0;
 
+  /** Optimistically append a user message, call the API, then append the answer. */
   async function submitMessage(rawMessage: string) {
     const message = rawMessage.trim();
     if (!message || loading) return;
@@ -264,10 +271,7 @@ export function ChatPanel() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1.35fr,1fr] lg:items-stretch">
-
-      {/* ── Cột chat ───────────────────────────────────── */}
       <section className="glass-card flex h-[72vh] min-h-[560px] max-h-[760px] flex-col overflow-hidden rounded-3xl">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-accent/15 bg-gradient-to-r from-accent/8 to-accent-2/8 px-5 py-3.5">
           <div className="flex items-center gap-3">
             <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-xl shadow-md">
@@ -284,7 +288,6 @@ export function ChatPanel() {
           </span>
         </div>
 
-        {/* Messages */}
         <div className="flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4">
           <AnimatePresence initial={false}>
             {messages.map((msg) => (
@@ -295,15 +298,13 @@ export function ChatPanel() {
                 transition={{ type: "spring", stiffness: 320, damping: 28 }}
                 className={`flex items-end gap-2 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
               >
-                {/* Bot avatar */}
                 {msg.role === "assistant" && (
                   <div className="mb-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-sm shadow-sm">
                     🍊
                   </div>
                 )}
 
-                <div className={`max-w-[78%]`}>
-                  {/* Bubble */}
+                <div className="max-w-[78%]">
                   <div
                     className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                       msg.role === "user"
@@ -314,7 +315,6 @@ export function ChatPanel() {
                     {msg.text}
                   </div>
 
-                  {/* Intent badge */}
                   {msg.role === "assistant" && msg.intent && (
                     <IntentBadge intent={msg.intent} confidence={msg.confidence} />
                   )}
@@ -323,7 +323,6 @@ export function ChatPanel() {
             ))}
           </AnimatePresence>
 
-          {/* Typing indicator */}
           {loading && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -347,16 +346,17 @@ export function ChatPanel() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Quick replies */}
         <div className="px-4 pt-1">
           <QuickReplies options={QUICK_OPTIONS} onPick={submitMessage} disabled={loading} />
         </div>
 
-        {/* Input bar */}
         <div className="border-t border-accent/10 bg-white/55 px-3 py-3">
           <form
             className="flex items-center gap-2"
-            onSubmit={(e) => { e.preventDefault(); void submitMessage(input); }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitMessage(input);
+            }}
           >
             <input
               ref={inputRef}
@@ -371,7 +371,6 @@ export function ChatPanel() {
               className="btn-send flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:scale-100"
               aria-label="Gửi tin nhắn"
             >
-              {/* Send icon */}
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 20 20"
@@ -394,9 +393,7 @@ export function ChatPanel() {
         </div>
       </section>
 
-      {/* ── Cột sản phẩm ──────────────────────────────── */}
       <section className="glass-card flex h-[420px] flex-col overflow-hidden rounded-3xl lg:h-[72vh] lg:min-h-[560px] lg:max-h-[760px]">
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-leaf/15 bg-gradient-to-r from-leaf/8 to-leaf/4 px-5 py-3.5">
           <div className="flex items-center gap-2.5">
             <span className="text-xl">🛒</span>
@@ -528,4 +525,3 @@ export function ChatPanel() {
     </div>
   );
 }
-

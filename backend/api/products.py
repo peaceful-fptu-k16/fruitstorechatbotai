@@ -20,5 +20,6 @@ def get_products(
     limit: int = Query(default=20, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> ProductsResponse:
+    """Return product catalog rows for the frontend and chatbot cards."""
     products = list_products(db, only_available=available_only, query=query, limit=limit)
     return ProductsResponse(total=len(products), items=[to_product_out(product) for product in products])

@@ -46,6 +46,7 @@ def _clean_text(value: str) -> str:
 
 
 def _trim_sentences(value: str, *, max_sentences: int = _MAX_REWRITE_SENTENCES) -> str:
+    """Limit generated copy to a small number of complete sentences."""
     cleaned = _clean_text(value)
     if not cleaned:
         return cleaned
@@ -57,6 +58,7 @@ def _trim_sentences(value: str, *, max_sentences: int = _MAX_REWRITE_SENTENCES) 
 
 
 def _strip_boilerplate_prefixes(value: str) -> str:
+    """Remove common model lead-ins that make chat answers feel padded."""
     cleaned = _clean_text(value)
     for prefix in _BOILERPLATE_PREFIXES:
         cleaned = re.sub(rf"^{re.escape(prefix)}\s*", "", cleaned, flags=re.IGNORECASE)
@@ -76,6 +78,7 @@ def _trim_words(value: str, *, max_words: int = _MAX_REWRITE_WORDS) -> str:
 
 
 def _strip_soft_follow_up(value: str) -> str:
+    """Remove optional trailing prompts when the caller wants a direct answer."""
     cleaned = _clean_text(value)
     trailing_follow_up = (
         r"\s+(?:Nếu muốn|Nếu cần|Bạn muốn|Bạn thích|Bạn có muốn|Mình có thể|Mình sẽ)"
@@ -95,6 +98,7 @@ def _finalize_concise_answer(
     allow_follow_up: bool = True,
     max_words: int = _MAX_REWRITE_WORDS,
 ) -> str:
+    """Apply final answer hygiene after either base or LM Studio rewriting."""
     cleaned = _strip_boilerplate_prefixes(value)
     if not allow_follow_up:
         cleaned = _strip_soft_follow_up(cleaned)
@@ -103,6 +107,7 @@ def _finalize_concise_answer(
 
 
 class ResponseRewriter:
+    """Optional LM Studio adapter that rewrites deterministic answers safely."""
     def __init__(
         self,
         *,
@@ -128,18 +133,22 @@ class ResponseRewriter:
         allow_follow_up: bool = True,
         rag_context: Optional[list[str]] = None,
     ) -> tuple[str, str]:
+        """Return a concise answer and the rewrite mode used to produce it."""
         cleaned = _clean_text(base_answer)
         if not cleaned:
             return base_answer, "none"
 
-        grounding_context = self._prepare_grounding_context(rag_context)
-
         if not self._can_use_lm_studio():
-            raise RuntimeError(
-                "Pipeline LM Studio chưa sẵn sàng. "
-                "Hãy kiểm tra LM_STUDIO_BASE_URL và load một model chat trong LM Studio."
+            return (
+                _finalize_concise_answer(
+                    cleaned,
+                    allow_follow_up=allow_follow_up,
+                    max_words=_MAX_REWRITE_WORDS_BY_INTENT.get(intent, _MAX_REWRITE_WORDS),
+                ),
+                "base",
             )
 
+        grounding_context = self._prepare_grounding_context(rag_context)
         lm_answer = self._rewrite_with_lm_studio(
             base_answer=cleaned,
             user_message=user_message,
@@ -160,6 +169,7 @@ class ResponseRewriter:
         query: str,
         allowed_areas: tuple[str, ...],
     ) -> Optional[dict[str, Any]]:
+        """Ask LM Studio to map messy address text to an allowed delivery area."""
         if not allowed_areas or not self._can_use_lm_studio():
             return None
 
@@ -220,9 +230,11 @@ class ResponseRewriter:
         }
 
     def _can_use_lm_studio(self) -> bool:
+        """Treat an empty base URL as an explicit request to skip LM Studio."""
         return bool(self.lm_studio_base_url)
 
     def _prepare_grounding_context(self, rag_context: Optional[list[str]]) -> list[str]:
+        """Deduplicate and trim RAG context before inserting it into a prompt."""
         if not rag_context:
             return []
 
@@ -373,6 +385,7 @@ class ResponseRewriter:
         return ""
 
     def _call_lm_studio(self, *, prompt: str, max_tokens: int = _MAX_REWRITE_TOKENS) -> Optional[str]:
+        """Call LM Studio's OpenAI-compatible chat endpoint with fallback URLs."""
         if not self._can_use_lm_studio():
             return None
 
@@ -545,6 +558,7 @@ class ResponseRewriter:
         allow_follow_up: bool,
         rag_context: list[str],
     ) -> Optional[str]:
+        """Build the rewrite prompt and sanitize the returned model text."""
         style_idx = self._style_index(user_message=user_message, intent=intent, session_id=session_id)
         tone = _STYLE_VARIANTS[style_idx]
         grounding_block = self._build_grounding_block(rag_context)

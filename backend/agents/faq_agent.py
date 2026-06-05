@@ -18,6 +18,7 @@ DeliveryAreaResolver = Callable[..., dict[str, Any] | None]
 
 
 class FAQAgent:
+    """Answers policy/shipping/storage questions using rules, ETA logic, then RAG."""
     def __init__(
         self,
         retriever: HybridRetriever,
@@ -27,9 +28,23 @@ class FAQAgent:
         self.delivery_area_resolver = delivery_area_resolver
 
     def answer(self, db: Session, query: str) -> tuple[str, list[dict]]:
+        """Return an FAQ answer plus citations for the chat response payload."""
         normalized = normalize_text(query)
         topic = None
-        if any(token in normalized for token in ("ship", "giao", "delivery", "bao lau")):
+        if any(token in normalized for token in ("ship", "giao", "delivery", "bao lau")) or any(
+            pattern in normalized
+            for pattern in (
+                "dat toi",
+                "dat den",
+                "dat ve",
+                "gui toi",
+                "gui den",
+                "gui ve",
+                "chuyen toi",
+                "chuyen den",
+                "chuyen ve",
+            )
+        ):
             topic = "shipping"
         elif any(token in normalized for token in ("doi", "tra", "refund")):
             topic = "return"

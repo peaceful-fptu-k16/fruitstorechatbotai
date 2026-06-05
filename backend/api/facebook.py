@@ -57,10 +57,12 @@ def _format_vnd(price: int) -> str:
 
 
 def _product_slug(name: str) -> str:
+    """Create a URL-safe product slug for external image URL templates."""
     return quote("-".join(normalize_text(name).split()))
 
 
 def _fruit_emoji(name: str) -> str:
+    """Choose a fruit emoji from the normalized product name."""
     normalized_name = normalize_text(name)
     for keyword, emoji in FRUIT_EMOJI_MAP:
         if normalize_text(keyword) in normalized_name:
@@ -85,6 +87,7 @@ def _fruit_logo_image_url(product: ProductOut) -> str:
 
 
 def _product_image_url(product: ProductOut, settings: Settings) -> str:
+    """Resolve product image URL, falling back to Twemoji when custom URL is absent."""
     image_base = settings.facebook_product_image_base_url.strip()
     if not image_base:
         return _fruit_logo_image_url(product)
@@ -107,6 +110,7 @@ def _build_product_template_elements(
     *,
     settings: Settings,
 ) -> list[MessengerGenericElement]:
+    """Build Messenger generic-template cards for product recommendations."""
     elements: list[MessengerGenericElement] = []
     for product in products[:10]:
         subtitle_parts = [
@@ -136,6 +140,7 @@ def _handle_product_postback(
     *,
     db: Session,
 ) -> tuple[str, list[ProductOut]]:
+    """Handle product card button payloads without re-entering the full chat router."""
     match = re.fullmatch(r"PRODUCT:(DETAIL|ORDER|ADD_TO_CART):(\d+)", payload)
     if not match:
         return "Mình chưa xử lý được nút này. Bạn nhắn lại nhu cầu mua trái cây giúp mình nhé.", []
@@ -174,6 +179,7 @@ def verify_webhook(
     hub_challenge: Optional[str] = Query(default=None, alias="hub.challenge"),
     settings: Settings = Depends(get_settings),
 ) -> PlainTextResponse:
+    """Complete Meta's webhook verification handshake."""
     if (
         hub_mode == "subscribe"
         and hub_challenge is not None
@@ -190,6 +196,7 @@ async def receive_webhook(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    """Receive Messenger events, run chat logic, and send replies back to Meta."""
     body = await request.body()
     if not verify_facebook_signature(
         app_secret=settings.facebook_app_secret,

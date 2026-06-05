@@ -45,6 +45,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 def _resolve_log_path(raw_path: str) -> Path:
+    """Resolve configured log paths relative to the project root."""
     path = Path(raw_path)
     if path.is_absolute():
         return path
@@ -54,6 +55,7 @@ def _resolve_log_path(raw_path: str) -> Path:
 
 
 def _read_qa_log_entries(settings: Settings, *, limit: int, window_hours: int) -> list[dict]:
+    """Read recent QA JSONL records for admin diagnostics."""
     log_path = _resolve_log_path(settings.qa_pair_log_path)
     if not log_path.exists():
         return []
@@ -91,6 +93,7 @@ def _read_qa_log_entries(settings: Settings, *, limit: int, window_hours: int) -
 
 
 def _refresh_local_product_state(request: Request, db: Session) -> None:
+    """Refresh local services after admin mutations and invalidate semantic cache."""
     services = getattr(request.app.state, "services", None)
     if services is not None:
         services.retriever.rebuild_index(db)
@@ -101,6 +104,7 @@ def _refresh_local_product_state(request: Request, db: Session) -> None:
 
 @router.post("/login", response_model=AdminLoginResponse)
 def admin_login(payload: AdminLoginRequest, settings: Settings = Depends(get_settings)) -> AdminLoginResponse:
+    """Authenticate admin credentials and return a bearer token."""
     if payload.username != settings.admin_username or payload.password != settings.admin_password:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
@@ -124,6 +128,7 @@ def admin_update_stock(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> AdminUpdateStockResponse:
+    """Apply idempotent stock updates and record inventory events."""
     if not payload.updates:
         raise HTTPException(status_code=400, detail="updates must not be empty")
 
@@ -207,6 +212,7 @@ def admin_update_product(
     admin: UserContext = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> ProductUpdateResponse:
+    """Patch editable product profile fields and refresh local indexes."""
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="At least one product field is required")
@@ -240,6 +246,7 @@ def admin_inventory_events(
     admin: UserContext = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ) -> InventoryEventsResponse:
+    """Return recent inventory audit events for the admin UI."""
     del admin
 
     if limit < 1 or limit > 200:
@@ -271,6 +278,7 @@ def admin_qa_insights(
     admin: UserContext = Depends(get_current_admin),
     settings: Settings = Depends(get_settings),
 ) -> QaInsightsResponse:
+    """Aggregate routing reasons/intents from QA logs for troubleshooting."""
     del admin
 
     if limit < 50 or limit > 5000:

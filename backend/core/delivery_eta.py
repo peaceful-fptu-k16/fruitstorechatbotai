@@ -12,6 +12,7 @@ MAX_AREAS_IN_ANSWER = 3
 
 @dataclass(frozen=True)
 class DeliveryAreaEstimate:
+    """Rule-based delivery zone with travel-time estimate and aliases."""
     name: str
     travel_minutes: tuple[int, int]
     aliases: tuple[str, ...]
@@ -143,6 +144,7 @@ DELIVERY_LOCATION_HINT_KEYWORDS: tuple[str, ...] = (
 
 
 def _contains_alias(normalized_query: str, alias: str) -> bool:
+    """Match an alias as words, with compact fallback for addresses without spaces."""
     normalized_alias = " ".join(normalize_text(alias).split())
     if not normalized_alias:
         return False
@@ -156,6 +158,7 @@ def _contains_alias(normalized_query: str, alias: str) -> bool:
 
 
 def extract_delivery_areas(query: str) -> list[DeliveryAreaEstimate]:
+    """Find all configured delivery areas mentioned in a user query."""
     normalized_query = " ".join(normalize_text(query).split())
     if not normalized_query:
         return []
@@ -169,6 +172,7 @@ def extract_delivery_areas(query: str) -> list[DeliveryAreaEstimate]:
 
 
 def find_delivery_area_by_name(area_name: str) -> DeliveryAreaEstimate | None:
+    """Resolve a canonical area or alias name to a delivery estimate."""
     normalized_area_name = " ".join(normalize_text(area_name).split())
     if not normalized_area_name:
         return None
@@ -183,6 +187,7 @@ def find_delivery_area_by_name(area_name: str) -> DeliveryAreaEstimate | None:
 
 
 def should_try_llm_delivery_area(query: str) -> bool:
+    """Decide when an address is specific enough to justify LM-assisted parsing."""
     if re.search(r"\d", query):
         return True
 
@@ -204,6 +209,7 @@ def build_delivery_eta_answer(
     matched_text: str = "",
     source: str = "rule",
 ) -> str | None:
+    """Build a grounded ETA answer from detected or hinted delivery areas."""
     areas = extract_delivery_areas(query)
     if not areas and area_hint:
         hinted_area = find_delivery_area_by_name(area_hint)

@@ -12,6 +12,7 @@ from backend.core.config import Settings
 
 
 def verify_facebook_signature(*, app_secret: str, body: bytes, signature_header: Optional[str]) -> bool:
+    """Validate Meta's X-Hub-Signature-256 header when an app secret is set."""
     if not app_secret:
         return True
     if not signature_header or not signature_header.startswith("sha256="):
@@ -23,6 +24,7 @@ def verify_facebook_signature(*, app_secret: str, body: bytes, signature_header:
 
 
 def split_messenger_text(text: str, *, limit: int = 1900) -> list[str]:
+    """Split long replies into Messenger-safe chunks without cutting every sentence."""
     normalized = " ".join(text.split())
     if len(normalized) <= limit:
         return [normalized]
@@ -67,6 +69,7 @@ class MessengerGenericElement:
 
 @dataclass
 class MessengerClient:
+    """Small client for sending text and generic-template messages to Messenger."""
     settings: Settings
 
     @property
@@ -83,6 +86,7 @@ class MessengerClient:
         }
 
     def _post_message(self, *, payload: dict) -> None:
+        """POST a prepared Messenger payload to the configured page endpoint."""
         if not self.settings.facebook_page_access_token:
             raise RuntimeError("FACEBOOK_PAGE_ACCESS_TOKEN is required to send Messenger replies")
 
@@ -91,6 +95,7 @@ class MessengerClient:
             response.raise_for_status()
 
     def send_text(self, *, recipient_id: str, text: str, messaging_type: str = "RESPONSE") -> None:
+        """Send one or more text chunks to a Messenger recipient."""
         if not self.settings.facebook_page_access_token:
             raise RuntimeError("FACEBOOK_PAGE_ACCESS_TOKEN is required to send Messenger replies")
 
@@ -111,6 +116,7 @@ class MessengerClient:
         messaging_type: str = "RESPONSE",
         image_aspect_ratio: str = "square",
     ) -> None:
+        """Send up to ten product-style generic template cards."""
         if not elements:
             return
 

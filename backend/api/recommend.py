@@ -18,6 +18,7 @@ def _format_vnd(price: int) -> str:
 
 
 def _build_recommend_rag_context(*, query: str, products: list[Product], retriever: object) -> list[str]:
+    """Build compact product/RAG facts for the optional answer rewriter."""
     raw_lines: list[str] = []
 
     try:
@@ -69,6 +70,7 @@ def recommend_products(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RecommendResponse:
+    """Recommend products and cache the deterministic ranking result briefly."""
     services = request.app.state.services
     sync_services_with_inventory(db, services)
 

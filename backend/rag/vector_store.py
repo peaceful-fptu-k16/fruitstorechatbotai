@@ -10,22 +10,26 @@ from backend.rag.embeddings import BaseEmbeddingModel
 
 @dataclass
 class VectorDocument:
+    """Text payload plus metadata stored in the in-memory retrieval index."""
     id: str
     text: str
     metadata: dict
 
 
 class InMemoryVectorStore:
+    """Small cosine-style vector store for prototype/local deployments."""
     def __init__(self, embedding_model: BaseEmbeddingModel) -> None:
         self.embedding_model = embedding_model
         self.documents: list[VectorDocument] = []
         self.embeddings = np.zeros((0, embedding_model.dim), dtype=np.float32)
 
     def reset(self) -> None:
+        """Drop all indexed documents and vectors."""
         self.documents.clear()
         self.embeddings = np.zeros((0, self.embedding_model.dim), dtype=np.float32)
 
     def add_documents(self, documents: list[VectorDocument]) -> None:
+        """Embed and append documents to the current index."""
         if not documents:
             return
 
@@ -43,6 +47,7 @@ class InMemoryVectorStore:
         top_k: int = 5,
         scope: Optional[str] = None,
     ) -> list[dict]:
+        """Return the highest-scoring documents, optionally restricted by scope."""
         if not self.documents:
             return []
 

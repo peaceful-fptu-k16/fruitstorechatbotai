@@ -19,6 +19,7 @@ def check_inventory(
     name: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ) -> InventoryResponse:
+    """Check a product's stock by id or best-effort name lookup."""
     if product_id is None and not name:
         return InventoryResponse(product=None, message="Vui lòng cung cấp product_id hoặc tên để kiểm tra tồn kho.")
 

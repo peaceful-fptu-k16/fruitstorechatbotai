@@ -16,6 +16,7 @@ from backend.rag.retriever import HybridRetriever
 
 @dataclass
 class ServiceContainer:
+    """Runtime objects that need to be shared across API requests."""
     router_agent: RouterAgent
     inventory_agent: InventoryAgent
     recommendation_agent: RecommendationAgent
@@ -27,8 +28,10 @@ class ServiceContainer:
 
 
 class ServiceFactory:
+    """Builds the application service graph from settings and database state."""
     @staticmethod
     def build(db: Session) -> ServiceContainer:
+        """Instantiate agents and build the first retrieval index from products/FAQ."""
         settings = get_settings()
         retriever = HybridRetriever()
         retriever.rebuild_index(db)
@@ -60,6 +63,7 @@ class ServiceFactory:
 
 
 def sync_services_with_inventory(db: Session, services: ServiceContainer) -> None:
+    """Refresh retriever/cache when admin changes advance the inventory revision."""
     latest_revision = get_latest_inventory_event_id(db)
     if latest_revision <= services.inventory_revision:
         return

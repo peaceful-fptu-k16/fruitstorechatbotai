@@ -19,10 +19,12 @@ def create_app(
     routers: Iterable[APIRouter],
     build_services: bool,
 ) -> FastAPI:
+    """Create a FastAPI app with shared database bootstrap and optional agents."""
     settings = get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """Initialize schema, seed catalog data, then build stateful services once."""
         Base.metadata.create_all(bind=engine)
         with SessionLocal() as db:
             seed_products(db)
@@ -43,6 +45,7 @@ def create_app(
 
     @app.get("/")
     def root() -> dict:
+        """Expose a tiny service descriptor for browser and uptime checks."""
         return {
             "service": service_name,
             "status": "ok",
@@ -51,6 +54,7 @@ def create_app(
 
     @app.get("/health")
     def health() -> dict:
+        """Return a stable health payload for Docker and load balancers."""
         return {"status": "healthy"}
 
     return app

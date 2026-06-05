@@ -3,6 +3,7 @@ from backend.schemas import ProductOut
 
 
 def to_product_out(product: Product) -> ProductOut:
+    """Map the SQLAlchemy Product row to the public response schema."""
     return ProductOut(
         id=product.id,
         name=product.name,

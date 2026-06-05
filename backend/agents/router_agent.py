@@ -7,6 +7,7 @@ from typing import Optional, Protocol
 
 import numpy as np
 
+from backend.core.delivery_eta import extract_delivery_areas, should_try_llm_delivery_area
 from backend.core.fruit_aliases import (
     FRUIT_ALIASES,
     fruit_alias_optional_context_pattern,
@@ -335,17 +336,20 @@ INTENT_ZERO_SHOT_LABELS: dict[str, str] = {
 
 @dataclass
 class Rule:
+    """Keyword route with a fixed confidence score."""
     intent: str
     keywords: tuple[str, ...]
     confidence: float
 
 
 class SemanticIntentBackend(Protocol):
+    """Protocol for optional semantic intent classifiers."""
     def predict_intent(self, message: str) -> Optional[tuple[str, float]]:
         ...
 
 
 class PretrainedSemanticIntentBackend:
+    """Embedding-centroid classifier built from intent hint examples."""
     def __init__(
         self,
         *,
@@ -360,6 +364,7 @@ class PretrainedSemanticIntentBackend:
         self.intent_matrix = self._build_intent_matrix()
 
     def _build_intent_matrix(self) -> np.ndarray:
+        """Average each intent's hint embeddings into a normalized centroid matrix."""
         vectors: list[np.ndarray] = []
         labels: list[str] = []
 
@@ -382,6 +387,7 @@ class PretrainedSemanticIntentBackend:
         return np.vstack(vectors)
 
     def predict_top_k(self, message: str, *, top_k: int = 3) -> list[tuple[str, float]]:
+        """Return highest-scoring intent centroids for a message."""
         if self.intent_matrix.size == 0 or not self.intent_labels:
             return []
 
@@ -395,6 +401,7 @@ class PretrainedSemanticIntentBackend:
         return [(self.intent_labels[int(idx)], float(scores[int(idx)])) for idx in chosen_indices]
 
     def predict_intent(self, message: str) -> Optional[tuple[str, float]]:
+        """Return the single best semantic intent when available."""
         top = self.predict_top_k(message, top_k=1)
         if not top:
             return None
@@ -402,6 +409,7 @@ class PretrainedSemanticIntentBackend:
 
 
 class ZeroShotIntentBackend:
+    """Optional Hugging Face zero-shot classifier for intent routing."""
     def __init__(
         self,
         *,
@@ -424,6 +432,7 @@ class ZeroShotIntentBackend:
         self._label_to_intent = {label: intent for intent, label in INTENT_ZERO_SHOT_LABELS.items()}
 
     def predict_top_k(self, message: str, *, top_k: int = 3) -> list[tuple[str, float]]:
+        """Map zero-shot natural-language labels back to internal intent ids."""
         result = self._classifier(
             message,
             candidate_labels=self._candidate_labels,
@@ -443,6 +452,7 @@ class ZeroShotIntentBackend:
         return candidates[: max(1, top_k)]
 
     def predict_intent(self, message: str) -> Optional[tuple[str, float]]:
+        """Return the top zero-shot intent when the model produces one."""
         top = self.predict_top_k(message, top_k=1)
         if not top:
             return None
@@ -450,6 +460,7 @@ class ZeroShotIntentBackend:
 
 
 class RouterAgent:
+    """Layered router: high-precision heuristics first, semantic fallback last."""
     @staticmethod
     def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
         return any(keyword in text for keyword in keywords)
@@ -474,10 +485,37 @@ class RouterAgent:
         )
 
     @staticmethod
+    def _has_delivery_destination_signal(raw_text: str, normalized_text: str) -> bool:
+        """Detect shipping questions that include an address or destination signal."""
+        destination_patterns = (
+            "dat toi",
+            "dat den",
+            "dat ve",
+            "gui toi",
+            "gui den",
+            "gui ve",
+            "chuyen toi",
+            "chuyen den",
+            "chuyen ve",
+            "ship toi",
+            "ship den",
+            "ship ve",
+            "giao toi",
+            "giao den",
+            "giao ve",
+        )
+        if not any(pattern in normalized_text for pattern in destination_patterns):
+            return False
+
+        return bool(extract_delivery_areas(raw_text)) or should_try_llm_delivery_area(raw_text)
+
+    @staticmethod
     def _intent_tokens(text: str) -> set[str]:
+        """Build normalized token sets for labeled-example overlap scoring."""
         return {token for token in re.findall(r"\w+", normalize_text(text)) if len(token) > 1}
 
     def _route_with_labeled_examples(self, normalized_message: str) -> Optional[IntentResult]:
+        """Match against curated examples before invoking heavier pretrained models."""
         message_tokens = self._intent_tokens(normalized_message)
         if not message_tokens:
             return None
@@ -656,6 +694,7 @@ class RouterAgent:
         router_backend: str,
         zero_shot_model_name: str,
     ) -> Optional[SemanticIntentBackend]:
+        """Create the configured semantic backend, falling back silently on failure."""
         normalized_backend = normalize_text(router_backend).replace("-", "_")
         try:
             if normalized_backend in {"zero_shot", "zeroshot"}:
@@ -670,6 +709,7 @@ class RouterAgent:
             return None
 
     def _has_in_domain_signal(self, normalized_message: str) -> bool:
+        """Check whether an otherwise weak message still belongs to fruit-shop scope."""
         tokens = set(re.findall(r"\w+", normalized_message))
         for keyword in IN_DOMAIN_GUARD_KEYWORDS:
             if " " in keyword:
@@ -683,6 +723,7 @@ class RouterAgent:
         return False
 
     def _predict_semantic_candidates(self, message: str, *, top_k: int = 3) -> list[tuple[str, float]]:
+        """Normalize backend-specific predictions into supported intent candidates."""
         if self.semantic_backend is None:
             return []
 
@@ -722,6 +763,7 @@ class RouterAgent:
         return [(predicted_intent, float(confidence))]
 
     def _route_with_pretrained_router(self, message: str) -> Optional[IntentResult]:
+        """Use semantic routing while guarding fruit-shop messages from false OOD."""
         candidates = self._predict_semantic_candidates(message, top_k=5)
         if not candidates:
             return None
@@ -766,6 +808,7 @@ class RouterAgent:
         )
 
     def route(self, user_message: str) -> IntentResult:
+        """Classify one user message into the internal intent taxonomy."""
         message = normalize_text(user_message)
         has_fruit_entity = self._has_fruit_entity(message)
 
@@ -800,6 +843,9 @@ class RouterAgent:
 
         if has_fruit_entity and self._has_quantity_item(message):
             return IntentResult(intent="inventory_check", confidence=0.90, reason="cart_quantity_heuristic")
+
+        if self._has_delivery_destination_signal(user_message, message):
+            return IntentResult(intent="faq_shipping", confidence=0.90, reason="delivery_destination_heuristic")
 
         unit_clarification_patterns = (
             "gia cho 1 qua",

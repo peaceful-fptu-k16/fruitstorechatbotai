@@ -33,10 +33,12 @@ EXTRA_NOISE_TOKENS: tuple[str, ...] = (
 
 class InventoryAgent:
     def list_available(self, db: Session, *, query: Optional[str] = None, limit: int = 8) -> list[Product]:
+        """List in-stock products, optionally filtered by a user search phrase."""
         return list_products(db, only_available=True, query=query, limit=limit)
 
     @staticmethod
     def _name_match_score(product: Product, query: str) -> int:
+        """Score how closely a product name matches the extracted candidate name."""
         normalized_name = normalize_text(product.name)
         normalized_query = normalize_text(query)
         if not normalized_query:
@@ -53,6 +55,7 @@ class InventoryAgent:
         return 0
 
     def check_inventory_by_name(self, db: Session, product_name: str) -> list[Product]:
+        """Find in-stock products for an explicit product name and rank exactness first."""
         if not product_name.strip():
             return []
         matches = [product for product in find_products_by_name(db, product_name, limit=8) if product.stock > 0]
@@ -67,6 +70,7 @@ class InventoryAgent:
         return matches[:5]
 
     def infer_focus_products(self, db: Session, user_message: str, *, limit: int = 3) -> list[Product]:
+        """Infer likely products from a free-form chat message."""
         normalized_message = normalize_text(user_message)
         if not normalized_message:
             return []
@@ -102,6 +106,7 @@ class InventoryAgent:
         return [product for _, product in scored[:limit]]
 
     def extract_candidate_name(self, user_message: str) -> str:
+        """Strip stock-question noise and keep the most product-like words."""
         normalized = normalize_text(user_message)
 
         for alias in extract_fruit_aliases(normalized, aliases=PRODUCT_ALIASES):

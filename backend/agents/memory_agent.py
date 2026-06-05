@@ -10,6 +10,7 @@ from backend.core.text import normalize_text
 
 @dataclass
 class PreferenceProfile:
+    """Session-level preference hints accumulated from previous user messages."""
     prefers_sweet: bool = False
     prefers_low_sour: bool = False
     prefers_low_seed: bool = False
@@ -25,6 +26,7 @@ class PreferenceProfile:
 
 
 class MemoryAgent:
+    """Keeps lightweight, per-session taste and budget memory in process."""
     def __init__(self) -> None:
         self._profiles: dict[str, PreferenceProfile] = defaultdict(PreferenceProfile)
 
@@ -37,6 +39,7 @@ class MemoryAgent:
         return any(keyword in text for keyword in keywords)
 
     def _extract_budget(self, normalized_message: str) -> Optional[int]:
+        """Parse the first money-like value from a normalized message."""
         matches = re.findall(r"(\d+)\s*(k|nghin|ngan|trieu)?", normalized_message)
         for number_text, suffix in matches:
             value = int(number_text)
@@ -50,6 +53,7 @@ class MemoryAgent:
         return None
 
     def update_from_message(self, session_id: str, message: str) -> None:
+        """Update preference flags from a single user utterance."""
         profile = self._profiles[session_id]
         normalized = normalize_text(message)
 
@@ -115,9 +119,11 @@ class MemoryAgent:
             profile.budget_hint = budget
 
     def get_profile(self, session_id: str) -> PreferenceProfile:
+        """Return the mutable profile for a session, creating it when needed."""
         return self._profiles[session_id]
 
     def profile_context(self, session_id: str) -> str:
+        """Render saved preferences as short text for logs or prompts."""
         profile = self.get_profile(session_id)
         hints = []
         if profile.prefers_sweet:
