@@ -1,0 +1,425 @@
+\documentclass[10pt,a4paper,twocolumn]{article}
+
+% Compile:
+% ..\tools\tectonic\tectonic.exe fruitstorechatbotai-paper.tex
+
+\usepackage[a4paper,top=1.65cm,bottom=1.85cm,left=1.55cm,right=1.55cm,columnsep=0.72cm]{geometry}
+\usepackage{fontspec}
+\usepackage[vietnamese]{babel}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{abstract}
+
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,calc}
+
+\IfFontExistsTF{Times New Roman}{\setmainfont{Times New Roman}}{\setmainfont{TeX Gyre Termes}}
+\IfFontExistsTF{Arial}{\setsansfont{Arial}}{\setsansfont{TeX Gyre Heros}}
+\IfFontExistsTF{Consolas}{\setmonofont{Consolas}}{\setmonofont{Latin Modern Mono}}
+
+\definecolor{fptblue}{HTML}{0072BC}
+\definecolor{fptorange}{HTML}{F37021}
+\definecolor{fptgreen}{HTML}{00A651}
+\definecolor{ink}{HTML}{1F2937}
+\definecolor{muted}{HTML}{6B7280}
+\definecolor{softblue}{HTML}{EAF3FB}
+\definecolor{softgreen}{HTML}{ECFDF3}
+\definecolor{softorange}{HTML}{FFF3E8}
+\definecolor{linegray}{HTML}{CBD5E1}
+
+\hypersetup{
+  pdftitle={FruitStoreChatbotAI: Chatbot bán trái cây tích hợp Messenger},
+  pdfauthor={Nguyễn Thanh Bình, Mai Văn An, Phạm Đình Hoàng, Nguyễn Tuấn Dũng}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\footnotesize FruitStoreChatbotAI}
+\rhead{\footnotesize FPT School of Business \& Technology}
+\cfoot{\footnotesize \thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\titleformat{\section}{\large\bfseries\color{fptblue}}{\thesection}{0.45em}{}
+\titleformat{\subsection}{\normalsize\bfseries\color{fptorange}}{\thesubsection}{0.45em}{}
+\titlespacing*{\section}{0pt}{0.72em}{0.32em}
+\titlespacing*{\subsection}{0pt}{0.56em}{0.22em}
+\captionsetup{font=footnotesize,labelfont=bf}
+\setlist[itemize]{leftmargin=*,topsep=2pt,itemsep=2pt,parsep=0pt}
+\setlength{\tabcolsep}{3.5pt}
+\renewcommand{\arraystretch}{1.12}
+\raggedbottom
+\sloppy
+\emergencystretch=2em
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\newcommand{\fptfallbacklogo}{%
+  \begin{tikzpicture}[baseline=-0.5ex]
+    \node[rounded corners=2pt,fill=fptblue,text=white,font=\bfseries\sffamily\Large,minimum width=1.0cm,minimum height=0.55cm] at (0,0) {F};
+    \node[rounded corners=2pt,fill=fptorange,text=white,font=\bfseries\sffamily\Large,minimum width=1.0cm,minimum height=0.55cm] at (1.08,0) {P};
+    \node[rounded corners=2pt,fill=fptgreen,text=white,font=\bfseries\sffamily\Large,minimum width=1.0cm,minimum height=0.55cm] at (2.16,0) {T};
+  \end{tikzpicture}
+}
+
+\begin{document}
+
+\twocolumn[
+\begin{@twocolumnfalse}
+\begin{center}
+\vspace*{-0.9em}
+\IfFileExists{fpt-logo.png}{\includegraphics[width=0.33\textwidth]{fpt-logo.png}}{\fptfallbacklogo}
+
+\vspace{0.65em}
+{\Large\bfseries\color{ink} FruitStoreChatbotAI: Chatbot bán trái cây tích hợp Facebook Messenger sử dụng RAG, Zero-shot Routing và LLM Rewrite\par}
+\vspace{0.45em}
+{\normalsize Nguyễn Thanh Bình, Mai Văn An, Phạm Đình Hoàng, Nguyễn Tuấn Dũng\par}
+{\small FPT School of Business \& Technology\par}
+\end{center}
+
+\begin{abstract}
+\noindent
+Bài báo trình bày FruitStoreChatbotAI, hệ thống chatbot hỗ trợ cửa hàng trái cây trên Facebook Messenger. Dự án tách thành admin-service cho quản trị sản phẩm/tồn kho và chatbot-service cho hội thoại, recommendation, FAQ, webhook Messenger và lớp AI. Thay vì để LLM tự trả lời trực tiếp, hệ thống dùng kiến trúc lai gồm heuristic/rule guard, labeled example router, zero-shot hoặc embedding fallback, RAG, recommendation agent, ETA giao hàng và LM Studio rewrite. Thiết kế này giữ giá, tồn kho, chính sách trong database/logic nghiệp vụ nhưng vẫn tạo câu trả lời ngắn gọn, tự nhiên và thân thiện.
+\end{abstract}
+
+\vspace{0.25em}
+\noindent\textbf{Từ khóa:} chatbot bán hàng, RAG, zero-shot classification, semantic search, FastAPI, Messenger, LM Studio.
+\vspace{0.85em}
+\end{@twocolumnfalse}
+]
+
+\section{Giới thiệu}
+Fanpage bán trái cây thường nhận nhiều câu hỏi lặp lại: hôm nay có gì, giá bao nhiêu, còn hàng không, nên mua loại nào, ship bao lâu và đổi trả thế nào. Dữ liệu lại thay đổi nhanh theo tồn kho, giá nhập và mùa vụ. Nếu dùng rule-only, chatbot khó hiểu câu hỏi tự nhiên; nếu dùng LLM trực tiếp, bot có thể bịa giá hoặc bịa tồn kho.
+
+FruitStoreChatbotAI dùng hướng hybrid: dữ liệu sản phẩm/FAQ là nguồn chân lý, agent nghiệp vụ tạo câu trả lời nền, còn deep learning hỗ trợ hiểu intent, truy xuất ngữ nghĩa, rerank và viết lại câu trả lời. Mục tiêu là bot trả lời tự nhiên nhưng vẫn kiểm soát được dữ kiện.
+
+\subsection{Đóng góp chính}
+\begin{itemize}
+  \item Tách hai service: admin-service cho vận hành nội bộ và chatbot-service cho Messenger.
+  \item Router nhiều lớp: heuristic/rule guard, labeled examples, zero-shot hoặc embedding fallback.
+  \item RAG và recommendation dựa trên thuộc tính vị, dinh dưỡng, ngân sách và mục đích dùng.
+  \item Webhook Facebook Messenger, Graph API, ngrok trong môi trường phát triển.
+  \item ETA giao hàng theo khu vực Hà Nội, cộng buffer chuẩn bị đơn và hỗ trợ LLM resolver cho địa chỉ khó.
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\caption{Stack công nghệ chính}
+\label{tab:techstack}
+\scriptsize
+\begin{tabularx}{\columnwidth}{@{}L{0.22\columnwidth}Y@{}}
+\toprule
+\textbf{Nhóm} & \textbf{Công nghệ và vai trò} \\
+\midrule
+Backend & FastAPI, Uvicorn, Pydantic v2, SQLAlchemy ORM. \\
+Dữ liệu & SQLite prototype; có thể nâng cấp PostgreSQL. \\
+AI/NLP & transformers, sentence-transformers, numpy, cross-encoder reranker. \\
+LLM & LM Studio qua OpenAI-compatible chat completions. \\
+Messenger & Facebook Graph API, webhook verify, Send API, ngrok HTTPS. \\
+Frontend & Next.js, React, Tailwind CSS, Framer Motion. \\
+DevOps & Docker Compose, cấu hình qua env/secret file. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Kiến trúc hệ thống}
+Hệ thống gồm hai service dùng chung database SQLite trong prototype. Admin-service chạy cổng 8000 để đăng nhập, quản trị sản phẩm, cập nhật tồn kho và audit. Chatbot-service chạy cổng 8001 để xử lý chat, recommendation, FAQ, inventory/products API và Messenger webhook. Khi admin cập nhật dữ liệu, bảng \texttt{inventory\_events} tăng revision; request chat kế tiếp sẽ rebuild retriever index và invalidate cache.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.88\columnwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=0.35cm,
+  box/.style={rounded corners=2pt,draw=linegray,thick,align=center,font=\scriptsize,minimum width=5.35cm,minimum height=0.48cm},
+  svc/.style={box,fill=softblue},
+  data/.style={box,fill=softgreen},
+  ai/.style={box,fill=softorange},
+  ext/.style={box,fill=white},
+  arrow/.style={-{Latex[length=1.6mm]},thick}
+]
+  \node[ext] (admin) {Admin UI /admin};
+  \node[svc,below=of admin] (adminsvc) {admin-service: login, update-stock, audit};
+  \node[data,below=of adminsvc] (db) {SQLite: products, FAQ, inventory events, messages};
+  \node[ext,below=0.75cm of db] (fb) {Facebook Messenger};
+  \node[ext,below=of fb] (ngrok) {ngrok HTTPS /webhooks/facebook};
+  \node[svc,below=of ngrok] (chat) {chatbot-service: chat, recommend, webhook};
+  \node[ai,below=of chat] (router) {RouterAgent + Inventory/FAQ/Recommendation};
+  \node[ai,below=of router] (rag) {RAG Retriever + Reranker + LM Studio Rewrite};
+  \node[ext,below=of rag] (send) {Graph API Send API};
+  \draw[arrow] (admin) -- (adminsvc);
+  \draw[arrow] (adminsvc) -- node[right,font=\tiny]{update/audit} (db);
+  \draw[arrow] (db) -- node[right,font=\tiny]{revision} (chat);
+  \draw[arrow] (fb) -- (ngrok);
+  \draw[arrow] (ngrok) -- (chat);
+  \draw[arrow] (chat) -- (router);
+  \draw[arrow] (router) -- (rag);
+  \draw[arrow] (rag) -- (send);
+  \draw[arrow] (send.east) .. controls +(1.0,0) and +(1.0,0) .. node[right,font=\tiny]{reply} (fb.east);
+\end{tikzpicture}}
+\caption{Kiến trúc tổng thể theo luồng dọc.}
+\label{fig:architecture}
+\end{figure}
+
+\section{Dữ liệu và snapshot}
+Sản phẩm lưu nhiều thuộc tính ngoài tên, giá và tồn kho: độ ngọt, độ chua, mức hạt, độ mọng nước, mùi thơm, độ giòn, vitamin C, chất xơ, đường tự nhiên, calo, texture, best-use, nguồn gốc, mùa vụ và thời gian bảo quản. Các trường này giúp recommendation agent tư vấn theo nhu cầu cụ thể.
+
+\begin{table}[H]
+\centering
+\caption{Snapshot số liệu dự án}
+\label{tab:snapshot}
+\scriptsize
+\begin{tabularx}{\columnwidth}{@{}L{0.43\columnwidth}rY@{}}
+\toprule
+\textbf{Hạng mục} & \textbf{SL} & \textbf{Ghi chú} \\
+\midrule
+Sản phẩm & 14 & Dữ liệu tư vấn chính. \\
+FAQ & 3 & Shipping, return, storage. \\
+Inventory events & 30 & Audit cập nhật kho. \\
+Conversation messages & 88 & Lịch sử demo/dev. \\
+Khu vực ETA & 12 & Hà Nội, xuất phát Nam Từ Liêm. \\
+Intent hỗ trợ & 10 & RouterAgent. \\
+API routes & 12 & Admin, chat, webhook, products. \\
+Source files & 63 & Backend, frontend, tools. \\
+Source lines & 10.174 & Snapshot dòng code. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=0.98\columnwidth,
+  height=4.0cm,
+  ymin=0,
+  ylabel={Dòng code},
+  symbolic x coords={Backend,Frontend,Tools},
+  xtick=data,
+  nodes near coords,
+  nodes near coords style={font=\tiny},
+  bar width=13pt,
+  enlarge x limits=0.25,
+  ymajorgrids=true,
+  grid style={linegray!55},
+  tick label style={font=\tiny},
+  label style={font=\tiny},
+]
+\addplot[fill=fptblue!75,draw=fptblue] coordinates {(Backend,7915) (Frontend,1219) (Tools,1040)};
+\end{axis}
+\end{tikzpicture}
+\caption{Phân bố dòng code theo module chính.}
+\label{fig:loc}
+\end{figure}
+
+\section{Pipeline chatbot}
+Luồng chính nằm trong \texttt{handle\_chat\_request}. Hệ thống không giao quyền quyết định nghiệp vụ cho LLM; agent tạo câu trả lời nền bằng dữ liệu thật, LLM chỉ rewrite câu cuối, sau đó guard kiểm tra lại.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.86\columnwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=0.33cm,
+  flow/.style={rounded corners=2pt,draw=linegray,thick,align=center,font=\scriptsize,minimum width=5.25cm,minimum height=0.44cm},
+  model/.style={flow,fill=softorange},
+  data/.style={flow,fill=softgreen},
+  rule/.style={flow,fill=softblue},
+  arrow/.style={-{Latex[length=1.5mm]},thick}
+]
+  \node[flow] (in) {Messenger/API input};
+  \node[rule,below=of in] (norm) {Normalize tiếng Việt, alias, context};
+  \node[rule,below=of norm] (r1) {Heuristic/rule guard};
+  \node[rule,below=of r1] (r2) {Labeled examples};
+  \node[model,below=of r2] (r3) {Zero-shot hoặc embedding fallback};
+  \node[data,below=of r3] (biz) {Inventory / FAQ / Recommendation};
+  \node[data,below=of biz] (rag) {RAG context và citations};
+  \node[model,below=of rag] (llm) {LM Studio rewrite};
+  \node[rule,below=of llm] (guard) {Validation guard};
+  \node[flow,below=of guard] (out) {ChatResponse / Messenger reply};
+  \foreach \a/\b in {in/norm,norm/r1,r1/r2,r2/r3,r3/biz,biz/rag,rag/llm,llm/guard,guard/out}
+    \draw[arrow] (\a) -- (\b);
+\end{tikzpicture}}
+\caption{Pipeline xử lý một câu hỏi khách hàng.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Router nhiều lớp}
+RouterAgent hỗ trợ 10 intent: greeting, available\_products, price\_general, inventory\_check, recommendation, order\_support, faq\_shipping, faq\_return, faq\_storage, admin\_update\_stock và out\_of\_domain. Thứ tự xử lý là heuristic/rule trước, labeled examples kế tiếp, pretrained zero-shot hoặc embedding router cuối cùng.
+
+\begin{table}[H]
+\centering
+\caption{Một số intent chính}
+\label{tab:intents}
+\scriptsize
+\begin{tabularx}{\columnwidth}{@{}L{0.32\columnwidth}Y@{}}
+\toprule
+\textbf{Intent} & \textbf{Luồng xử lý} \\
+\midrule
+inventory\_check & Hỏi giá/tồn kho; tìm sản phẩm và trả dữ liệu thật. \\
+price\_general & Hỏi giá chung; trả bảng giá nhanh nếu chưa có entity. \\
+recommendation & Parse nhu cầu, ngân sách, khẩu vị; rank sản phẩm. \\
+faq\_shipping & Trả FAQ hoặc ETA khu vực giao hàng. \\
+order\_support & Tạm tính đơn khi có nhiều sản phẩm/số lượng. \\
+out\_of\_domain & Hướng người dùng về phạm vi shop trái cây. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{RAG và recommendation}
+HybridRetriever xây index in-memory từ products và FAQ. Với sentence-transformers, câu hỏi và document được mã hóa thành vector; truy xuất dùng cosine similarity:
+\begin{equation}
+  s(q,d)=\frac{\mathbf{v}_q \cdot \mathbf{v}_d}{\|\mathbf{v}_q\|\|\mathbf{v}_d\|}
+\end{equation}
+RecommendationAgent parse constraint như ngọt, ít chua, ít đường, vitamin C, ít hạt, texture, đối tượng dùng và ngân sách. Điểm tư vấn có dạng:
+\begin{equation}
+  R(p,q)=\alpha P(p,c)+\beta S(p,q)+\gamma B(p,b)
+\end{equation}
+trong đó \(P\) là điểm thuộc tính, \(S\) là semantic relevance và \(B\) là điểm ngân sách.
+
+\subsection{LLM rewrite và guard}
+ResponseRewriter gọi LM Studio qua OpenAI-compatible chat completions. Prompt yêu cầu tiếng Việt có dấu, tối đa hai câu, trả lời trực tiếp, vui tươi nhẹ, không emoji/markdown và không bịa dữ kiện. Chat flow đặt \texttt{allow\_follow\_up=False}. Sau rewrite, guard kiểm tra lại entity, giá và ngân sách; nếu lệch, hệ thống sửa bằng câu trả lời an toàn từ products/constraints.
+
+\section{ETA giao hàng}
+Module \texttt{delivery\_eta.py} hỗ trợ 12 khu vực Hà Nội, xuất phát từ Nam Từ Liêm. Mỗi khu vực có khoảng thời gian di chuyển và alias địa danh. ETA được tính:
+\begin{equation}
+  ETA(area)=Travel(area)+30\text{ phút}
+\end{equation}
+Nếu rule không khớp nhưng câu hỏi có dấu hiệu địa chỉ, LLM resolver phân loại địa chỉ về khu vực cho phép. Kết quả chỉ được nhận khi confidence tối thiểu 0,65.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  xbar,
+  width=0.98\columnwidth,
+  height=4.7cm,
+  xmin=0,
+  xlabel={ETA tối đa (phút)},
+  symbolic y coords={Nam TL,Cầu Giấy,Thanh Xuân,Hà Đông,Hoàn Kiếm,Long Biên},
+  ytick=data,
+  nodes near coords,
+  nodes near coords style={font=\tiny},
+  bar width=9pt,
+  xmajorgrids=true,
+  grid style={linegray!55},
+  tick label style={font=\tiny},
+  label style={font=\tiny},
+]
+\addplot[fill=fptorange!75,draw=fptorange] coordinates {(50,Nam TL) (55,Cầu Giấy) (60,Thanh Xuân) (65,Hà Đông) (75,Hoàn Kiếm) (90,Long Biên)};
+\end{axis}
+\end{tikzpicture}
+\caption{ETA tối đa sau khi cộng 30 phút chuẩn bị đơn.}
+\label{fig:eta}
+\end{figure}
+
+\section{Messenger webhook}
+Meta gọi \texttt{GET /webhooks/facebook} để verify webhook bằng \texttt{FACEBOOK\_VERIFY\_TOKEN}. Khi người dùng nhắn tin, Meta gửi \texttt{POST /webhooks/facebook}; service kiểm tra chữ ký nếu có \texttt{FACEBOOK\_APP\_SECRET}, bỏ qua echo message, lấy PSID làm user/session, gọi \texttt{handle\_chat\_request}, rồi gửi reply qua Graph API Send API.
+
+\begin{table}[H]
+\centering
+\caption{Biến môi trường quan trọng}
+\label{tab:env}
+\scriptsize
+\begin{tabularx}{\columnwidth}{@{}L{0.46\columnwidth}Y@{}}
+\toprule
+\textbf{Biến} & \textbf{Mục đích} \\
+\midrule
+\texttt{FACEBOOK\_VERIFY\_TOKEN} & Verify webhook. \\
+\texttt{FACEBOOK\_PAGE\_ACCESS\_TOKEN} & Gửi reply qua Graph API. \\
+\texttt{FACEBOOK\_APP\_SECRET} & Xác minh chữ ký webhook. \\
+\texttt{LM\_STUDIO\_BASE\_URL} & Endpoint cho LLM rewrite. \\
+\texttt{PRETRAINED\_INTENT\_*} & Cấu hình zero-shot/embedding router. \\
+\texttt{EMBEDDING\_MODEL\_NAME} & Model embedding cho RAG. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Vận hành, bảo mật và quan sát}
+Admin-service dùng đăng nhập riêng, cấp token Bearer và bảo vệ các endpoint cập nhật sản phẩm/tồn kho. API update-stock dùng \texttt{Idempotency-Key} để tránh áp dụng trùng request; rate limit giúp giảm thao tác lặp quá nhanh. Các secret như Page Access Token, App Secret, verify token và endpoint LM Studio được đặt qua biến môi trường, không đưa vào source code.
+
+Về quan sát hệ thống, chatbot ghi \texttt{trace\_id}, intent, confidence, \texttt{route\_reason}, \texttt{route\_input} và rewrite mode vào log QA. Đây là dữ liệu quan trọng để xây bộ evaluation từ câu hỏi Messenger thật, phát hiện intent sai, mở rộng alias trái cây và kiểm thử lại prompt/model sau mỗi lần chỉnh.
+
+\section{Ví dụ và đánh giá}
+\begin{table}[H]
+\centering
+\caption{Ví dụ input/output}
+\label{tab:examples}
+\scriptsize
+\begin{tabularx}{\columnwidth}{@{}L{0.44\columnwidth}Y@{}}
+\toprule
+\textbf{Input} & \textbf{Output kỳ vọng} \\
+\midrule
+Cam Úc còn không? & Trả tồn kho và giá Cam Úc. \\
+Trái nào ít chua dưới 100k? & Gợi ý 1--2 sản phẩm hợp ngân sách. \\
+Mình lấy 2 táo và 1 cam & Tạm tính từng dòng hàng và tổng tiền. \\
+Ship Duy Tân bao lâu? & ETA khu vực Cầu Giấy, cộng chuẩn bị đơn. \\
+oi còn không & Hỏi lại để phân biệt quả ổi/trái lê. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=0.98\columnwidth,
+  height=4.0cm,
+  ymin=0,
+  ylabel={Số lượng},
+  symbolic x coords={Products,FAQ,Areas,Intents,Routes},
+  xtick=data,
+  x tick label style={rotate=35,anchor=east,font=\tiny},
+  nodes near coords,
+  nodes near coords style={font=\tiny},
+  bar width=10pt,
+  ymajorgrids=true,
+  grid style={linegray!55},
+  label style={font=\tiny},
+]
+\addplot[fill=fptgreen!75,draw=fptgreen] coordinates {(Products,14) (FAQ,3) (Areas,12) (Intents,10) (Routes,12)};
+\end{axis}
+\end{tikzpicture}
+\caption{Một số hạng mục chức năng trong snapshot hiện tại.}
+\label{fig:features}
+\end{figure}
+
+Hệ thống hiện ở mức prototype. Hạn chế chính là dữ liệu test intent chưa đủ lớn, SQLite chưa phù hợp khi có nhiều admin/page cùng ghi, webhook gửi reply đồng bộ và chất lượng LLM phụ thuộc model đang load trong LM Studio. Hướng cải tiến gồm xây evaluation từ log Messenger, chuyển sang PostgreSQL, thêm queue cho Send API và quản trị FAQ/alias trong admin UI.
+
+\section{Kết luận}
+FruitStoreChatbotAI là hệ thống chatbot bán hàng theo hướng thực dụng: tách service vận hành và service hội thoại, dùng database làm nguồn chân lý, dùng deep learning cho hiểu ngôn ngữ và dùng LLM để diễn đạt câu trả lời cuối. Kiến trúc nhiều lớp giúp giảm rủi ro bịa thông tin nhưng vẫn giữ trải nghiệm tự nhiên trên Messenger.
+
+\begin{thebibliography}{9}
+\footnotesize
+\bibitem{fastapi}
+FastAPI Documentation, \url{https://fastapi.tiangolo.com/}.
+
+\bibitem{facebookmessenger}
+Meta for Developers, Messenger Platform Webhooks and Send API, \url{https://developers.facebook.com/docs/messenger-platform/}.
+
+\bibitem{rag}
+P. Lewis et al., ``Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks,'' NeurIPS, 2020.
+
+\bibitem{zeroshot}
+Y. Yin, J. Hay, and D. Roth, ``Benchmarking Zero-shot Text Classification,'' EMNLP, 2019.
+
+\bibitem{bge}
+BAAI, BGE Embedding Models, \url{https://huggingface.co/BAAI}.
+\end{thebibliography}
+
+\end{document}
