@@ -1,3 +1,4 @@
+% !TeX spellcheck = none
 \documentclass[10pt,a4paper,twocolumn]{article}
 
 % Compile:
@@ -94,7 +95,7 @@
 
 \begin{abstract}
 \noindent
-Bài báo trình bày FruitStoreChatbotAI, hệ thống chatbot hỗ trợ cửa hàng trái cây trên Facebook Messenger. Dự án tách thành admin-service cho quản trị sản phẩm/tồn kho và chatbot-service cho hội thoại, recommendation, FAQ, webhook Messenger và lớp AI. Thay vì để LLM tự trả lời trực tiếp, hệ thống dùng kiến trúc lai gồm heuristic/rule guard, labeled example router, zero-shot hoặc embedding fallback, RAG, recommendation agent, ETA giao hàng và LM Studio rewrite. Thiết kế này giữ giá, tồn kho, chính sách trong database/logic nghiệp vụ nhưng vẫn tạo câu trả lời ngắn gọn, tự nhiên và thân thiện.
+Bài báo trình bày FruitStoreChatbotAI, hệ thống chatbot hỗ trợ cửa hàng trái cây trên web và Facebook Messenger. Dự án tách thành admin-service cho quản trị sản phẩm/tồn kho và chatbot-service cho hội thoại, recommendation, FAQ, webhook Messenger và lớp AI. Chatbot-service bắt buộc sử dụng pretrained zero-shot router, BGE-M3 embedding, BGE reranker và LM Studio; các thành phần được kiểm tra theo cơ chế fail-fast trước khi service nhận traffic. Rule guard, agent nghiệp vụ và database vẫn giữ quyền kiểm soát intent cuối, giá, tồn kho và chính sách. Thiết kế này kết hợp khả năng hiểu ngôn ngữ tự nhiên với độ chính xác dữ kiện cần thiết cho bán hàng.
 \end{abstract}
 
 \vspace{0.25em}
@@ -111,10 +112,11 @@ FruitStoreChatbotAI dùng hướng hybrid: dữ liệu sản phẩm/FAQ là ngu�
 \subsection{Đóng góp chính}
 \begin{itemize}
   \item Tách hai service: admin-service cho vận hành nội bộ và chatbot-service cho Messenger.
-  \item Router nhiều lớp: heuristic/rule guard, labeled examples, zero-shot hoặc embedding fallback.
-  \item RAG và recommendation dựa trên thuộc tính vị, dinh dưỡng, ngân sách và mục đích dùng.
+  \item Pretrained zero-shot router chạy cho mọi input; heuristic/rule guard và labeled examples bảo vệ intent nghiệp vụ.
+  \item RAG bắt buộc dùng BGE-M3 embedding và BGE reranker; recommendation dựa trên vị, dinh dưỡng, ngân sách và mục đích dùng.
   \item Webhook Facebook Messenger, Graph API, ngrok trong môi trường phát triển.
   \item ETA giao hàng theo khu vực Hà Nội, cộng buffer chuẩn bị đơn và hỗ trợ LLM resolver cho địa chỉ khó.
+  \item Fail-fast, \texttt{/health}, \texttt{/ai/status} và frontend readiness ngăn người dùng gửi tin khi AI runtime chưa sẵn sàng.
 \end{itemize}
 
 \begin{table}[H]
@@ -128,8 +130,8 @@ FruitStoreChatbotAI dùng hướng hybrid: dữ liệu sản phẩm/FAQ là ngu�
 \midrule
 Backend & FastAPI, Uvicorn, Pydantic v2, SQLAlchemy ORM. \\
 Dữ liệu & SQLite prototype; có thể nâng cấp PostgreSQL. \\
-AI/NLP & transformers, sentence-transformers, numpy, cross-encoder reranker. \\
-LLM & LM Studio qua OpenAI-compatible chat completions. \\
+AI/NLP & Zero-shot router, BGE-M3 embedding và BGE reranker bắt buộc. \\
+LLM & LM Studio bắt buộc qua OpenAI-compatible chat completions. \\
 Messenger & Facebook Graph API, webhook verify, Send API, ngrok HTTPS. \\
 Frontend & Next.js, React, Tailwind CSS, Framer Motion. \\
 DevOps & Docker Compose, cấu hình qua env/secret file. \\
@@ -138,7 +140,7 @@ DevOps & Docker Compose, cấu hình qua env/secret file. \\
 \end{table}
 
 \section{Kiến trúc hệ thống}
-Hệ thống gồm hai service dùng chung database SQLite trong prototype. Admin-service chạy cổng 8000 để đăng nhập, quản trị sản phẩm, cập nhật tồn kho và audit. Chatbot-service chạy cổng 8001 để xử lý chat, recommendation, FAQ, inventory/products API và Messenger webhook. Khi admin cập nhật dữ liệu, bảng \texttt{inventory\_events} tăng revision; request chat kế tiếp sẽ rebuild retriever index và invalidate cache.
+Hệ thống gồm hai service dùng chung database SQLite trong prototype. Admin-service chạy cổng 8000 để đăng nhập, quản trị sản phẩm, cập nhật tồn kho và audit; service này dùng \texttt{build\_services=False} nên không tải model AI. Chatbot-service chạy cổng 8001 để xử lý chat, recommendation, FAQ, inventory/products API và Messenger webhook. Khi startup, chatbot-service probe LM Studio, tải BGE-M3 embedding, BGE reranker, dựng index và tải router; thiếu một thành phần bắt buộc sẽ làm startup thất bại. Khi admin cập nhật dữ liệu, bảng \texttt{inventory\_events} tăng revision; request chat kế tiếp sẽ rebuild retriever index và invalidate cache.
 
 \begin{figure}[H]
 \centering
@@ -155,11 +157,11 @@ Hệ thống gồm hai service dùng chung database SQLite trong prototype. Admi
   \node[ext] (admin) {Admin UI /admin};
   \node[svc,below=of admin] (adminsvc) {admin-service: login, update-stock, audit};
   \node[data,below=of adminsvc] (db) {SQLite: products, FAQ, inventory events, messages};
-  \node[ext,below=0.75cm of db] (fb) {Facebook Messenger};
+  \node[ext,below=0.75cm of db] (fb) {Web frontend / Facebook Messenger};
   \node[ext,below=of fb] (ngrok) {ngrok HTTPS /webhooks/facebook};
   \node[svc,below=of ngrok] (chat) {chatbot-service: chat, recommend, webhook};
-  \node[ai,below=of chat] (router) {RouterAgent + Inventory/FAQ/Recommendation};
-  \node[ai,below=of router] (rag) {RAG Retriever + Reranker + LM Studio Rewrite};
+  \node[ai,below=of chat] (router) {Pretrained Router + rule guard + business agents};
+  \node[ai,below=of router] (rag) {BGE-M3 Retrieval + BGE Reranker + LM Studio};
   \node[ext,below=of rag] (send) {Graph API Send API};
   \draw[arrow] (admin) -- (adminsvc);
   \draw[arrow] (adminsvc) -- node[right,font=\tiny]{update/audit} (db);
@@ -189,13 +191,13 @@ Sản phẩm lưu nhiều thuộc tính ngoài tên, giá và tồn kho: độ n
 \midrule
 Sản phẩm & 14 & Dữ liệu tư vấn chính. \\
 FAQ & 3 & Shipping, return, storage. \\
-Inventory events & 30 & Audit cập nhật kho. \\
-Conversation messages & 88 & Lịch sử demo/dev. \\
+Inventory events & 19 & Audit cập nhật kho. \\
+Conversation messages & 368 & Lịch sử demo/dev. \\
 Khu vực ETA & 12 & Hà Nội, xuất phát Nam Từ Liêm. \\
-Intent hỗ trợ & 10 & RouterAgent. \\
-API routes & 12 & Admin, chat, webhook, products. \\
-Source files & 63 & Backend, frontend, tools. \\
-Source lines & 10.174 & Snapshot dòng code. \\
+Intent hỗ trợ & 11 & RouterAgent. \\
+API routes & 13 & Admin, AI status, chat, webhook, products. \\
+Source files & 57 & Backend, frontend, tools. \\
+Source lines & 12.402 & Snapshot ngày 07/06/2026. \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -220,7 +222,7 @@ Source lines & 10.174 & Snapshot dòng code. \\
   tick label style={font=\tiny},
   label style={font=\tiny},
 ]
-\addplot[fill=fptblue!75,draw=fptblue] coordinates {(Backend,7915) (Frontend,1219) (Tools,1040)};
+\addplot[fill=fptblue!75,draw=fptblue] coordinates {(Backend,9636) (Frontend,1515) (Tools,1251)};
 \end{axis}
 \end{tikzpicture}
 \caption{Phân bố dòng code theo module chính.}
@@ -243,15 +245,14 @@ Luồng chính nằm trong \texttt{handle\_chat\_request}. Hệ thống không g
 ]
   \node[flow] (in) {Messenger/API input};
   \node[rule,below=of in] (norm) {Normalize tiếng Việt, alias, context};
-  \node[rule,below=of norm] (r1) {Heuristic/rule guard};
-  \node[rule,below=of r1] (r2) {Labeled examples};
-  \node[model,below=of r2] (r3) {Zero-shot hoặc embedding fallback};
-  \node[data,below=of r3] (biz) {Inventory / FAQ / Recommendation};
+  \node[model,below=of norm] (r1) {Pretrained zero-shot inference bắt buộc};
+  \node[rule,below=of r1] (r2) {Heuristic/rule + labeled guard chọn intent cuối};
+  \node[data,below=of r2] (biz) {Inventory / FAQ / Recommendation};
   \node[data,below=of biz] (rag) {RAG context và citations};
   \node[model,below=of rag] (llm) {LM Studio rewrite};
   \node[rule,below=of llm] (guard) {Validation guard};
   \node[flow,below=of guard] (out) {ChatResponse / Messenger reply};
-  \foreach \a/\b in {in/norm,norm/r1,r1/r2,r2/r3,r3/biz,biz/rag,rag/llm,llm/guard,guard/out}
+  \foreach \a/\b in {in/norm,norm/r1,r1/r2,r2/biz,biz/rag,rag/llm,llm/guard,guard/out}
     \draw[arrow] (\a) -- (\b);
 \end{tikzpicture}}
 \caption{Pipeline xử lý một câu hỏi khách hàng.}
@@ -259,7 +260,7 @@ Luồng chính nằm trong \texttt{handle\_chat\_request}. Hệ thống không g
 \end{figure}
 
 \subsection{Router nhiều lớp}
-RouterAgent hỗ trợ 10 intent: greeting, available\_products, price\_general, inventory\_check, recommendation, order\_support, faq\_shipping, faq\_return, faq\_storage, admin\_update\_stock và out\_of\_domain. Thứ tự xử lý là heuristic/rule trước, labeled examples kế tiếp, pretrained zero-shot hoặc embedding router cuối cùng.
+RouterAgent hỗ trợ 11 intent: greeting, available\_products, price\_general, inventory\_check, recommendation, order\_support, faq\_shipping, faq\_return, faq\_storage, admin\_update\_stock và out\_of\_domain. Pretrained semantic backend được gọi ngay đầu hàm route cho mọi câu hỏi. Kết quả zero-shot được giữ lại, nhưng heuristic/rule và labeled examples có thể ghi đè khi có tín hiệu nghiệp vụ rõ; nếu không có lớp chắc chắn hơn, kết quả pretrained đạt ngưỡng được dùng.
 
 \begin{table}[H]
 \centering
@@ -281,7 +282,7 @@ out\_of\_domain & Hướng người dùng về phạm vi shop trái cây. \\
 \end{table}
 
 \subsection{RAG và recommendation}
-HybridRetriever xây index in-memory từ products và FAQ. Với sentence-transformers, câu hỏi và document được mã hóa thành vector; truy xuất dùng cosine similarity:
+HybridRetriever xây index in-memory từ products và FAQ bằng \texttt{BAAI/bge-m3}. Câu hỏi và document được mã hóa thành vector; truy xuất ban đầu dùng cosine similarity:
 \begin{equation}
   s(q,d)=\frac{\mathbf{v}_q \cdot \mathbf{v}_d}{\|\mathbf{v}_q\|\|\mathbf{v}_d\|}
 \end{equation}
@@ -291,8 +292,10 @@ RecommendationAgent parse constraint như ngọt, ít chua, ít đường, vitam
 \end{equation}
 trong đó \(P\) là điểm thuộc tính, \(S\) là semantic relevance và \(B\) là điểm ngân sách.
 
+Candidate pool sau vector search bắt buộc được xếp hạng lại bằng \texttt{BAAI/bge-reranker-v2-m3}. Hệ thống không còn hashing fallback hoặc chế độ bỏ qua reranker; lỗi tải model hay inference được báo rõ để tránh âm thầm chạy ở chất lượng thấp.
+
 \subsection{LLM rewrite và guard}
-ResponseRewriter gọi LM Studio qua OpenAI-compatible chat completions. Prompt yêu cầu tiếng Việt có dấu, tối đa hai câu, trả lời trực tiếp, vui tươi nhẹ, không emoji/markdown và không bịa dữ kiện. Chat flow đặt \texttt{allow\_follow\_up=False}. Sau rewrite, guard kiểm tra lại entity, giá và ngân sách; nếu lệch, hệ thống sửa bằng câu trả lời an toàn từ products/constraints.
+ResponseRewriter bắt buộc gọi LM Studio qua OpenAI-compatible chat completions. Khi startup, code gọi \texttt{/v1/models}, xác nhận hoặc tự chọn model chat/instruct và gửi một completion probe. Prompt yêu cầu tiếng Việt có dấu, tối đa hai câu, trả lời trực tiếp và không bịa dữ kiện. Mọi chat response và Messenger postback phải rewrite thành công; lỗi LM Studio làm API trả 503 thay vì quay về câu nền. Sau rewrite, guard kiểm tra entity, giá và ngân sách; nếu lệch, hệ thống sửa bằng dữ liệu products/constraints.
 
 \section{ETA giao hàng}
 Module \texttt{delivery\_eta.py} hỗ trợ 12 khu vực Hà Nội, xuất phát từ Nam Từ Liêm. Mỗi khu vực có khoảng thời gian di chuyển và alias địa danh. ETA được tính:
@@ -342,15 +345,19 @@ Meta gọi \texttt{GET /webhooks/facebook} để verify webhook bằng \texttt{F
 \texttt{FACEBOOK\_VERIFY\_TOKEN} & Verify webhook. \\
 \texttt{FACEBOOK\_PAGE\_ACCESS\_TOKEN} & Gửi reply qua Graph API. \\
 \texttt{FACEBOOK\_APP\_SECRET} & Xác minh chữ ký webhook. \\
-\texttt{LM\_STUDIO\_BASE\_URL} & Endpoint cho LLM rewrite. \\
-\texttt{PRETRAINED\_INTENT\_*} & Cấu hình zero-shot/embedding router. \\
-\texttt{EMBEDDING\_MODEL\_NAME} & Model embedding cho RAG. \\
+\texttt{LM\_STUDIO\_BASE\_URL} & Endpoint LM Studio bắt buộc; local dùng localhost, Docker dùng host.docker.internal. \\
+\texttt{USE\_PRETRAINED\_INTENT\_ROUTER} & Phải là true; service từ chối startup nếu tắt. \\
+\texttt{PRETRAINED\_INTENT\_*} & Cấu hình zero-shot router, mặc định xlm-roberta-large-xnli. \\
+\texttt{EMBEDDING\_MODEL\_NAME} & BGE-M3 embedding bắt buộc cho RAG. \\
+\texttt{PRETRAINED\_RERANKER\_*} & BGE reranker bắt buộc cho candidate pool. \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \section{Vận hành, bảo mật và quan sát}
 Admin-service dùng đăng nhập riêng, cấp token Bearer và bảo vệ các endpoint cập nhật sản phẩm/tồn kho. API update-stock dùng \texttt{Idempotency-Key} để tránh áp dụng trùng request; rate limit giúp giảm thao tác lặp quá nhanh. Các secret như Page Access Token, App Secret, verify token và endpoint LM Studio được đặt qua biến môi trường, không đưa vào source code.
+
+Chatbot-service dùng fail-fast: router, embedding, reranker và LM Studio phải sẵn sàng trước khi startup hoàn tất. Endpoint \texttt{/health} trả 503 nếu AI runtime lỗi; \texttt{/ai/status} trả readiness và model của từng thành phần. Frontend kiểm tra endpoint này khi mở trang và mỗi 30 giây, đồng thời khóa ô nhập cùng quick replies khi runtime chưa sẵn sàng. Docker cài bộ requirements đầy đủ và dùng volume Hugging Face cache để tránh tải lại model.
 
 Về quan sát hệ thống, chatbot ghi \texttt{trace\_id}, intent, confidence, \texttt{route\_reason}, \texttt{route\_input} và rewrite mode vào log QA. Đây là dữ liệu quan trọng để xây bộ evaluation từ câu hỏi Messenger thật, phát hiện intent sai, mở rộng alias trái cây và kiểm thử lại prompt/model sau mỗi lần chỉnh.
 
@@ -392,17 +399,17 @@ oi còn không & Hỏi lại để phân biệt quả ổi/trái lê. \\
   grid style={linegray!55},
   label style={font=\tiny},
 ]
-\addplot[fill=fptgreen!75,draw=fptgreen] coordinates {(Products,14) (FAQ,3) (Areas,12) (Intents,10) (Routes,12)};
+\addplot[fill=fptgreen!75,draw=fptgreen] coordinates {(Products,14) (FAQ,3) (Areas,12) (Intents,11) (Routes,13)};
 \end{axis}
 \end{tikzpicture}
 \caption{Một số hạng mục chức năng trong snapshot hiện tại.}
 \label{fig:features}
 \end{figure}
 
-Hệ thống hiện ở mức prototype. Hạn chế chính là dữ liệu test intent chưa đủ lớn, SQLite chưa phù hợp khi có nhiều admin/page cùng ghi, webhook gửi reply đồng bộ và chất lượng LLM phụ thuộc model đang load trong LM Studio. Hướng cải tiến gồm xây evaluation từ log Messenger, chuyển sang PostgreSQL, thêm queue cho Send API và quản trị FAQ/alias trong admin UI.
+Hệ thống hiện ở mức prototype. Hạn chế chính là dữ liệu test intent chưa đủ lớn, SQLite chưa phù hợp khi có nhiều admin/page cùng ghi và webhook gửi reply đồng bộ. Kiến trúc pretrained AI bắt buộc cũng làm tăng thời gian startup, RAM/VRAM và phụ thuộc vận hành vào LM Studio; môi trường demo đầy đủ nên chuẩn bị khoảng 16 GB RAM. Hướng cải tiến gồm xây evaluation từ log Messenger, đo accuracy/factuality/latency, chuyển sang PostgreSQL, thêm queue cho Send API, theo dõi \texttt{/health}/\texttt{/ai/status} và quản trị FAQ/alias trong admin UI.
 
 \section{Kết luận}
-FruitStoreChatbotAI là hệ thống chatbot bán hàng theo hướng thực dụng: tách service vận hành và service hội thoại, dùng database làm nguồn chân lý, dùng deep learning cho hiểu ngôn ngữ và dùng LLM để diễn đạt câu trả lời cuối. Kiến trúc nhiều lớp giúp giảm rủi ro bịa thông tin nhưng vẫn giữ trải nghiệm tự nhiên trên Messenger.
+FruitStoreChatbotAI là hệ thống chatbot bán hàng theo hướng thực dụng: tách service vận hành và service hội thoại, dùng database làm nguồn chân lý, bắt buộc pretrained AI cho routing/retrieval và dùng LM Studio để diễn đạt câu trả lời cuối. Rule guard, agent nghiệp vụ, fail-fast và readiness giúp giảm rủi ro bịa thông tin hoặc âm thầm hạ chất lượng khi model lỗi, trong khi vẫn giữ trải nghiệm tự nhiên trên web và Messenger.
 
 \begin{thebibliography}{9}
 \footnotesize

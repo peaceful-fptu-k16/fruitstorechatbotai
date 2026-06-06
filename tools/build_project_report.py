@@ -142,6 +142,37 @@ def set_run_font(run, *, size: float | None = None, bold: bool | None = None, co
         run.font.color.rgb = color
 
 
+def disable_proofing(doc: Document) -> None:
+    """Disable spelling and grammar marks in Word and LibreOffice."""
+    settings = doc.settings._element
+    for tag_name in ("w:hideSpellingErrors", "w:hideGrammaticalErrors"):
+        if settings.find(qn(tag_name)) is None:
+            settings.append(OxmlElement(tag_name))
+
+    for style in doc.styles:
+        if style.type == 1:
+            style_pr = style._element.get_or_add_rPr()
+            if style_pr.find(qn("w:noProof")) is None:
+                style_pr.append(OxmlElement("w:noProof"))
+
+    containers = [doc]
+    for section in doc.sections:
+        containers.extend((section.header, section.footer))
+
+    for container in containers:
+        paragraphs = list(container.paragraphs)
+        for table in container.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    paragraphs.extend(cell.paragraphs)
+
+        for paragraph in paragraphs:
+            for run in paragraph.runs:
+                run_pr = run._element.get_or_add_rPr()
+                if run_pr.find(qn("w:noProof")) is None:
+                    run_pr.append(OxmlElement("w:noProof"))
+
+
 def configure_styles(doc: Document) -> None:
     styles = doc.styles
 
@@ -233,8 +264,63 @@ def add_bullets(doc: Document, items: list[str]) -> None:
 
 
 def add_numbered(doc: Document, items: list[str]) -> None:
+    numbering = doc.part.numbering_part.element
+    abstract_ids = [
+        int(node.get(qn("w:abstractNumId")))
+        for node in numbering
+        if node.tag == qn("w:abstractNum") and node.get(qn("w:abstractNumId")) is not None
+    ]
+    num_ids = [
+        int(node.get(qn("w:numId")))
+        for node in numbering
+        if node.tag == qn("w:num") and node.get(qn("w:numId")) is not None
+    ]
+    abstract_id = max(abstract_ids, default=-1) + 1
+    num_id = max(num_ids, default=0) + 1
+
+    abstract_num = OxmlElement("w:abstractNum")
+    abstract_num.set(qn("w:abstractNumId"), str(abstract_id))
+    multi_level = OxmlElement("w:multiLevelType")
+    multi_level.set(qn("w:val"), "singleLevel")
+    abstract_num.append(multi_level)
+
+    level = OxmlElement("w:lvl")
+    level.set(qn("w:ilvl"), "0")
+    for tag_name, value in (("w:start", "1"), ("w:numFmt", "decimal"), ("w:lvlText", "%1."), ("w:lvlJc", "right")):
+        node = OxmlElement(tag_name)
+        node.set(qn("w:val"), value)
+        level.append(node)
+    paragraph_props = OxmlElement("w:pPr")
+    indentation = OxmlElement("w:ind")
+    indentation.set(qn("w:left"), "720")
+    indentation.set(qn("w:hanging"), "360")
+    paragraph_props.append(indentation)
+    level.append(paragraph_props)
+    abstract_num.append(level)
+
+    first_num = numbering.find(qn("w:num"))
+    if first_num is None:
+        numbering.append(abstract_num)
+    else:
+        numbering.insert(numbering.index(first_num), abstract_num)
+
+    concrete_num = OxmlElement("w:num")
+    concrete_num.set(qn("w:numId"), str(num_id))
+    abstract_ref = OxmlElement("w:abstractNumId")
+    abstract_ref.set(qn("w:val"), str(abstract_id))
+    concrete_num.append(abstract_ref)
+    numbering.append(concrete_num)
+
     for item in items:
         p = doc.add_paragraph(style="List Number")
+        p_pr = p._p.get_or_add_pPr()
+        num_pr = OxmlElement("w:numPr")
+        ilvl = OxmlElement("w:ilvl")
+        ilvl.set(qn("w:val"), "0")
+        num_id_node = OxmlElement("w:numId")
+        num_id_node.set(qn("w:val"), str(num_id))
+        num_pr.extend((ilvl, num_id_node))
+        p_pr.append(num_pr)
         run = p.add_run(item)
         set_run_font(run)
 
@@ -340,7 +426,7 @@ def cover_page(doc: Document) -> None:
     add_callout(
         doc,
         "Tóm tắt điều hành",
-        "FruitStoreChatbotAI được thiết kế theo hướng tách service: admin-service dùng cho quản trị sản phẩm/tồn kho, chatbot-service dùng cho hội thoại tự động qua Facebook Messenger. Lõi hệ thống hiện dùng router nhiều lớp gồm heuristic/rule guard, labeled examples, zero-shot hoặc embedding fallback, RAG retrieval, recommendation agent, ETA giao hàng theo khu vực và LM Studio rewrite để trả lời ngắn gọn, đúng dữ kiện sản phẩm.",
+        "FruitStoreChatbotAI được thiết kế theo hướng tách service: admin-service dùng cho quản trị sản phẩm/tồn kho, chatbot-service dùng cho hội thoại tự động qua web và Facebook Messenger. Chatbot-service bắt buộc sử dụng pretrained zero-shot router, BGE-M3 embedding, BGE reranker và LM Studio. Rule guard và agent nghiệp vụ vẫn giữ quyền quyết định cuối để câu trả lời bám đúng giá, tồn kho, chính sách và dữ liệu sản phẩm.",
     )
 
     doc.add_page_break()
@@ -368,7 +454,7 @@ def build_report() -> None:
         [
             "Admin cập nhật sản phẩm, giá, chỉ số vị, mô tả và tồn kho qua UI tiếng Việt.",
             "Khách hàng nhắn vào Facebook Page; Meta gửi sự kiện tới /webhooks/facebook qua ngrok hoặc domain HTTPS.",
-            "Chatbot phân loại intent, truy vấn dữ liệu sản phẩm/FAQ, tính đơn theo số lượng, ước tính ETA giao hàng và viết lại câu trả lời bằng LM Studio theo prompt ngắn gọn, vui tươi.",
+            "Chatbot luôn chạy pretrained semantic router, sau đó kết hợp rule guard để phân loại intent, truy vấn sản phẩm/FAQ, tính đơn, ước tính ETA và viết lại mọi câu trả lời bằng LM Studio.",
             "Hệ thống ghi log câu hỏi/câu trả lời để phục vụ đánh giá chất lượng và cải tiến bộ nhận dạng intent.",
         ],
     )
@@ -396,8 +482,8 @@ def build_report() -> None:
             ["Backend API", "FastAPI, Uvicorn", "Tạo admin-service, chatbot-service, endpoint chat/recommend/webhook/admin."],
             ["Dữ liệu", "SQLite, SQLAlchemy ORM", "Lưu products, FAQ, conversation, inventory_events, idempotency_keys."],
             ["Validation", "Pydantic v2", "Định nghĩa schema request/response như ChatRequest, ProductOut, AdminUpdateStockRequest."],
-            ["AI/NLP", "transformers, sentence-transformers, numpy", "Router zero-shot/embedding fallback, labeled example routing, embedding retrieval, fallback hashing embedding, optional reranker."],
-            ["LLM rewrite", "LM Studio", "Viết lại câu trả lời cuối cùng bằng tiếng Việt ngắn gọn, có kiểm soát dữ kiện; đồng thời hỗ trợ suy luận khu vực giao hàng khi rule chưa bắt được địa chỉ."],
+            ["AI/NLP", "transformers, sentence-transformers, numpy", "Zero-shot router bắt buộc, BGE-M3 embedding bắt buộc và BAAI/bge-reranker-v2-m3 bắt buộc cho truy xuất ngữ nghĩa."],
+            ["LLM rewrite", "LM Studio", "Runtime bắt buộc cho chatbot; được kiểm tra khi startup và dùng để viết lại mọi câu trả lời, kể cả Messenger postback."],
             ["Messenger", "Facebook Graph API, httpx", "Verify webhook, nhận message event, gửi reply qua Send API."],
             ["Frontend", "Next.js 15, React 19, Tailwind CSS, Framer Motion", "Demo chat UI và các component product/quick replies."],
             ["Triển khai local", "Docker Compose, ngrok", "Chạy hai service backend và expose webhook HTTPS cho Meta."],
@@ -408,16 +494,17 @@ def build_report() -> None:
     add_heading(doc, "3. Kiến trúc hệ thống", 1)
     add_para(
         doc,
-        "Kiến trúc hiện tại tách rõ hai mặt vận hành. Admin-service không cần dựng các agent AI nặng, vì nhiệm vụ chính là cập nhật dữ liệu và audit. Chatbot-service khởi tạo ServiceContainer gồm RouterAgent, InventoryAgent, RecommendationAgent, FAQAgent, MemoryAgent, HybridRetriever và ResponseRewriter. FAQAgent nhận thêm delivery_area_resolver từ ResponseRewriter để ước tính khu vực giao hàng khi người dùng hỏi ship. Cách tách này giúp service admin nhẹ hơn, còn service chatbot tập trung vào xử lý hội thoại.",
+        "Kiến trúc hiện tại tách rõ hai mặt vận hành. Admin-service được tạo với build_services=False nên không tải các model AI nặng. Chatbot-service khởi tạo ServiceContainer gồm RouterAgent, InventoryAgent, RecommendationAgent, FAQAgent, MemoryAgent, HybridRetriever và ResponseRewriter. Khi startup, service kiểm tra LM Studio, tải embedding/reranker, dựng index rồi tải router; nếu một thành phần bắt buộc không sẵn sàng thì startup thất bại thay vì chạy ở chế độ chất lượng thấp.",
     )
     add_code_block(
         doc,
         "Admin UI/API  --->  admin-service:8000  --->  SQLite products/inventory_events\n"
-        "Facebook Page ->  ngrok HTTPS       --->  chatbot-service:8001\n"
-        "                                   --->  RouterAgent -> Inventory/FAQ/Recommendation\n"
-        "                                   --->  FAQAgent -> Delivery ETA theo khu vực Hà Nội\n"
-        "                                   --->  HybridRetriever/RAG -> ResponseRewriter/LM Studio\n"
-        "                                   --->  Messenger Send API -> Người dùng",
+        "Web frontend  --->  GET /ai/status      --->  chỉ mở chat khi toàn bộ AI ready\n"
+        "Web/Messenger --->  chatbot-service:8001\n"
+        "                 --->  Pretrained Router + rule guard\n"
+        "                 --->  Inventory/FAQ/Recommendation + Delivery ETA\n"
+        "                 --->  BGE-M3 retrieval + BGE reranker\n"
+        "                 --->  ResponseRewriter/LM Studio -> Output",
     )
     add_para(
         doc,
@@ -447,7 +534,6 @@ def build_report() -> None:
         "Mô hình dữ liệu đã đi theo hướng phù hợp với tư vấn bán hàng: vừa có dữ liệu định lượng để lọc/rank, vừa có mô tả tự nhiên để đưa vào retriever và câu trả lời.",
     )
 
-    doc.add_page_break()
     add_heading(doc, "5. Pipeline xử lý chatbot", 1)
     add_para(
         doc,
@@ -459,7 +545,7 @@ def build_report() -> None:
             "Nhận ChatRequest từ /chat hoặc từ webhook Messenger, tạo trace_id và ghi log câu hỏi.",
             "Cập nhật MemoryAgent theo session để lưu sở thích như ngọt, ít chua, ít đường, ngân sách.",
             "Mở rộng input nếu người dùng dùng từ tham chiếu như 'quả đó', 'giá này' bằng cách lấy message trước đó.",
-            "RouterAgent chạy các heuristic/rule guard trước, sau đó thử labeled example router, cuối cùng mới dùng zero-shot hoặc embedding backend làm fallback nếu cần.",
+            "RouterAgent luôn chạy pretrained semantic inference cho input. Sau đó heuristic, keyword rule và labeled example có thể ghi đè kết quả semantic khi có tín hiệu nghiệp vụ rõ.",
             "Tùy intent, hệ thống gọi InventoryAgent, FAQAgent, Delivery ETA hoặc RecommendationAgent để tạo câu trả lời nền và danh sách sản phẩm liên quan.",
             "HybridRetriever truy xuất ngữ cảnh sản phẩm/FAQ để tạo citations và grounding context.",
             "ResponseRewriter dùng LM Studio để viết lại câu trả lời tiếng Việt ngắn, đúng dữ kiện và không thêm câu hỏi gợi mở ở cuối.",
@@ -470,7 +556,7 @@ def build_report() -> None:
     add_heading(doc, "5.1 Intent router", 2)
     add_para(
         doc,
-        "RouterAgent hiện ưu tiên độ chắc chắn của luật nghiệp vụ trước khi gọi model. Thứ tự xử lý là: greeting/price/order/quantity/comparison/catalog/inventory heuristics, keyword rules, labeled example router, pretrained zero-shot hoặc embedding router, rồi mới tới fallback cuối. Với backend zero_shot, hệ thống dùng transformers pipeline zero-shot-classification và các nhãn mô tả intent bằng tiếng Việt không dấu; với backend embedding, hệ thống dùng centroid semantic hints qua SentenceTransformerEmbeddingModel.",
+        "RouterAgent gọi pretrained semantic backend ngay đầu hàm route cho mọi câu hỏi. Cấu hình mặc định dùng zero-shot classification với joeddav/xlm-roberta-large-xnli. Kết quả semantic được giữ lại, nhưng các heuristic có độ chính xác cao như giá, tồn kho, số lượng, giao hàng, recommendation và keyword/labeled examples được xét trước khi trả kết quả. Nếu không có lớp chắc chắn hơn, hệ thống dùng kết quả pretrained đạt ngưỡng; lỗi tải hoặc lỗi inference của model bắt buộc làm request/service thất bại rõ ràng.",
     )
     add_matrix_table(
         doc,
@@ -493,7 +579,7 @@ def build_report() -> None:
     )
     add_para(
         doc,
-        "HybridRetriever tạo index in-memory từ sản phẩm và FAQ. Với cấu hình sentence_transformers, retriever dùng embedding model như BAAI/bge-m3; nếu không tải được model, hệ thống fallback sang HashingEmbeddingModel để service vẫn hoạt động. Nếu bật reranker, CrossEncoderReranker có thể xếp lại candidate pool. Cách thiết kế này cho phép chạy được cả môi trường offline-safe lẫn môi trường có model pretrained.",
+        "HybridRetriever tạo index in-memory từ sản phẩm và FAQ bằng BAAI/bge-m3 thông qua sentence-transformers. Mỗi truy vấn lấy một candidate pool theo vector similarity rồi bắt buộc xếp hạng lại bằng BAAI/bge-reranker-v2-m3. Không còn hashing fallback hay chế độ bỏ qua reranker; lỗi tải model hoặc lỗi inference được đẩy thành lỗi runtime để tránh trả kết quả semantic kém mà người vận hành không biết.",
     )
     add_bullets(
         doc,
@@ -507,12 +593,12 @@ def build_report() -> None:
     add_heading(doc, "6.1 LLM rewrite", 2)
     add_para(
         doc,
-        "ResponseRewriter không chịu trách nhiệm quyết định nghiệp vụ. Nó nhận base_answer đã được tạo bởi logic hệ thống, rag_context đã lọc, intent và câu hỏi người dùng. Prompt hiện yêu cầu trả lời tiếng Việt có dấu, trả lời trực tiếp ngay câu đầu, tối đa 2 câu và khoảng 45 từ, giọng vui tươi nhẹ, không emoji/markdown/hashtag và tuyệt đối không bịa dữ kiện. Chat flow hiện đặt allow_follow_up=False nên lớp rewrite sẽ loại bỏ câu hỏi gợi mở mềm ở cuối. LM Studio được gọi qua OpenAI-compatible /chat/completions và có cơ chế tự chọn model chat/instruct nếu cấu hình LM_STUDIO_MODEL_NAME để trống.",
+        "ResponseRewriter không chịu trách nhiệm quyết định nghiệp vụ. Nó nhận base_answer đã được tạo bởi logic hệ thống, rag_context đã lọc, intent và câu hỏi người dùng. Prompt yêu cầu tiếng Việt có dấu, trực tiếp, tối đa 2 câu và khoảng 45 từ, không bịa dữ kiện. LM Studio là thành phần bắt buộc: startup gọi /v1/models để xác nhận model đã tải, tự chọn model chat/instruct nếu tên để trống, rồi gửi một chat completion probe. Mọi chat response và Messenger postback cần rewrite thành công; nếu LM Studio lỗi, API trả 503 thay vì âm thầm dùng câu nền.",
     )
     add_callout(
         doc,
         "Triết lý AI của dự án",
-        "LLM được dùng như lớp diễn đạt cuối cùng, không phải nguồn chân lý. Nguồn chân lý vẫn là database, inventory agent, FAQ và recommendation logic.",
+        "Pretrained AI và LM Studio là bắt buộc về mặt runtime, nhưng không phải nguồn chân lý nghiệp vụ. Nguồn chân lý vẫn là database, inventory agent, FAQ và recommendation logic; AI chịu trách nhiệm hiểu ngôn ngữ, truy xuất theo nghĩa và diễn đạt.",
     )
 
     add_heading(doc, "6.2 ETA giao hàng theo khu vực", 2)
@@ -555,7 +641,6 @@ def build_report() -> None:
         "Trong môi trường local, ngrok được dùng để tạo HTTPS public URL trỏ về chatbot-service cổng 8001. URL cấu hình trong Meta có dạng https://<domain-ngrok>/webhooks/facebook. Page cần được subscribe field messages và messaging_postbacks, đồng thời token Page Access Token phải đúng Page đang test.",
     )
 
-    doc.add_page_break()
     add_heading(doc, "8. Admin service và giao diện quản trị", 1)
     add_para(
         doc,
@@ -581,16 +666,17 @@ def build_report() -> None:
     add_heading(doc, "9. Triển khai, cấu hình và vận hành", 1)
     add_para(
         doc,
-        "Dự án có hai cách chạy: local bằng uvicorn hoặc Docker Compose. Với local, admin-service chạy port 8000 và chatbot-service chạy port 8001. Với Docker Compose, chatbot container expose host port 8001 nhưng bên trong vẫn chạy uvicorn port 8000. Các biến môi trường quan trọng nằm trong .env.example và có thể tách sang .env.secret để tránh commit token thật.",
+        "Dự án có hai cách chạy: local bằng uvicorn hoặc Docker Compose. Với local, admin-service chạy port 8000 và chatbot-service chạy port 8001. Với Docker Compose, chatbot container expose host port 8001 nhưng bên trong chạy uvicorn port 8000; LM Studio trên máy host được truy cập qua host.docker.internal. Docker luôn cài bộ requirements đầy đủ và dùng volume huggingface-cache để tránh tải lại model. Frontend gọi /ai/status mỗi 30 giây và khóa ô nhập cho đến khi router, embedding, reranker và LM Studio đều sẵn sàng.",
     )
     add_matrix_table(
         doc,
         ["Biến cấu hình", "Mục đích", "Khuyến nghị"],
         [
-            ["USE_PRETRAINED_INTENT_ROUTER", "Bật/tắt router pretrained.", "Bật true khi muốn dùng zero-shot/embedding model."],
-            ["PRETRAINED_INTENT_ROUTER_BACKEND", "Chọn zero_shot hoặc embedding.", "Hiện ưu tiên zero_shot cho phân loại câu hỏi."],
-            ["EMBEDDING_BACKEND / EMBEDDING_MODEL_NAME", "Model truy xuất ngữ nghĩa cho RAG.", "Có thể dùng hashing khi chạy offline-safe."],
-            ["LM_STUDIO_BASE_URL", "Địa chỉ API tương thích OpenAI của LM Studio.", "Mặc định http://localhost:1234/v1; cần bật Local Server."],
+            ["USE_PRETRAINED_INTENT_ROUTER", "Bật router pretrained bắt buộc.", "Phải là true; service từ chối startup nếu tắt."],
+            ["PRETRAINED_INTENT_ROUTER_BACKEND", "Chọn zero_shot hoặc embedding.", "Mặc định zero_shot với joeddav/xlm-roberta-large-xnli."],
+            ["EMBEDDING_BACKEND / EMBEDDING_MODEL_NAME", "Model truy xuất ngữ nghĩa cho RAG.", "Phải là sentence_transformers; mặc định BAAI/bge-m3."],
+            ["USE_PRETRAINED_RERANKER / MODEL_NAME", "Bật và chọn cross-encoder reranker.", "Phải là true; mặc định BAAI/bge-reranker-v2-m3."],
+            ["LM_STUDIO_BASE_URL", "Địa chỉ API tương thích OpenAI của LM Studio.", "Bắt buộc; local dùng localhost, Docker dùng host.docker.internal."],
             ["LM_STUDIO_MODEL_NAME", "Tên model chat/instruct dùng cho rewrite.", "Có thể để trống để code tự chọn model không phải embedding."],
             ["FACEBOOK_VERIFY_TOKEN", "Token verify webhook với Meta.", "Giữ bí mật, nhập đúng trong Meta dashboard."],
             ["FACEBOOK_PAGE_ACCESS_TOKEN", "Token gửi tin nhắn qua Send API.", "Không commit; cần đúng Page."],
@@ -618,7 +704,7 @@ def build_report() -> None:
             "Rate limit admin theo rate_limit_requests/rate_limit_window_seconds.",
             "Không nên commit FACEBOOK_PAGE_ACCESS_TOKEN, ngrok authtoken, API key hoặc LM Studio public URL nếu nhạy cảm.",
             "qa_pairs.jsonl và user_questions.jsonl là nguồn quan trọng để audit câu sai, nhưng cần kiểm soát dữ liệu cá nhân khi dùng production.",
-            "Fallback hashing embedding giúp retriever vẫn chạy khi model embedding tải lỗi; riêng chat rewrite hiện yêu cầu LM Studio sẵn sàng, nếu không service trả lỗi 503 rõ nguyên nhân.",
+            "Chatbot-service dùng fail-fast: thiếu router, BGE-M3 embedding, BGE reranker hoặc LM Studio thì không hoàn tất startup. /health và /ai/status tiếp tục phản ánh readiness; frontend không cho gửi tin khi runtime chưa sẵn sàng.",
         ],
     )
 
@@ -639,11 +725,10 @@ def build_report() -> None:
         [2300, 3600, 3460],
     )
 
-    doc.add_page_break()
     add_heading(doc, "12. Hạn chế hiện tại và hướng cải tiến", 1)
     add_para(
         doc,
-        "Dự án đã có nền tảng tốt nhưng vẫn đang ở giai đoạn cần tinh chỉnh để đạt chất lượng production ổn định. Vấn đề thường gặp là intent router nhận chưa đúng các câu quá ngắn, câu viết tắt, câu sai chính tả hoặc câu có ngữ cảnh phụ thuộc hội thoại trước. Bên cạnh đó, LLM rewrite dù đã bị ràng buộc vẫn cần kiểm thử thực tế để tránh dài dòng hoặc thiếu dữ kiện quan trọng.",
+        "Dự án đã có nền tảng tốt nhưng vẫn đang ở giai đoạn cần tinh chỉnh để đạt chất lượng production ổn định. Vấn đề thường gặp là intent router nhận chưa đúng câu quá ngắn, viết tắt hoặc phụ thuộc ngữ cảnh. Kiến trúc AI bắt buộc cũng làm thời gian startup, RAM và phụ thuộc vận hành tăng lên: phải có model pretrained trong cache hoặc cho phép tải từ xa, đồng thời LM Studio phải luôn chạy với một model chat/instruct đã nạp.",
     )
     add_numbered(
         doc,
@@ -656,6 +741,7 @@ def build_report() -> None:
             "Thêm test tự động cho webhook, intent routing, recommendation constraints và prompt rewrite guard.",
             "Bổ sung quản trị FAQ trong admin UI để chủ shop tự sửa chính sách giao hàng/đổi trả mà không cần sửa code.",
             "Bổ sung bộ test ETA giao hàng cho các địa chỉ Hà Nội dễ nhầm khu vực như Nguyễn Trãi, Phạm Hùng, Lê Văn Lương.",
+            "Theo dõi thời gian tải model, RAM/VRAM và độ trễ router-retriever-reranker-LM Studio; chuẩn bị tối thiểu khoảng 16 GB RAM cho môi trường demo đầy đủ.",
         ],
     )
     add_callout(
@@ -667,7 +753,7 @@ def build_report() -> None:
     add_heading(doc, "13. Kết luận", 1)
     add_para(
         doc,
-        "FruitStoreChatbotAI là một dự án có kiến trúc rõ và đúng hướng cho bài toán chatbot bán hàng nhỏ: quản trị dữ liệu tách khỏi chatbot, dữ liệu sản phẩm đủ giàu để tư vấn, pipeline AI có nhiều lớp kiểm soát, ETA giao hàng đã được tách thành logic riêng, và Messenger webhook đã có cơ chế nhận/gửi tin nhắn. Điểm mạnh nhất của hệ thống là không phụ thuộc hoàn toàn vào LLM; LLM chủ yếu làm lớp diễn đạt cuối cùng và hỗ trợ phân loại khu vực giao hàng khi cần, nên rủi ro bịa thông tin được giảm đáng kể.",
+        "FruitStoreChatbotAI có kiến trúc rõ cho bài toán chatbot bán hàng nhỏ: quản trị dữ liệu tách khỏi chatbot, pretrained AI được dùng nhất quán cho routing và retrieval, LM Studio được dùng cho lớp diễn đạt, còn rule/agent/database giữ quyền kiểm soát dữ kiện. Cơ chế fail-fast và readiness giúp hệ thống không âm thầm hạ chất lượng khi model lỗi; đổi lại, môi trường vận hành phải bảo đảm đủ tài nguyên và duy trì LM Studio ổn định.",
     )
     add_para(
         doc,
@@ -675,6 +761,7 @@ def build_report() -> None:
     )
 
     configure_sections(doc)
+    disable_proofing(doc)
     doc.save(OUT_FILE)
 
 

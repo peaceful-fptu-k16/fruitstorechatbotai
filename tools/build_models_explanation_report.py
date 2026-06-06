@@ -21,6 +21,7 @@ from build_project_report import (
     add_para,
     configure_sections,
     configure_styles,
+    disable_proofing,
     set_run_font,
 )
 
@@ -51,7 +52,7 @@ def cover_page(doc: Document) -> None:
             ("Mục đích", "Giải thích cách các mô hình và công nghệ trong dự án phối hợp để hiểu câu hỏi, truy xuất dữ liệu, tư vấn sản phẩm và trả lời qua Messenger."),
             ("Đối tượng đọc", "Người phát triển dự án, người vận hành fanpage, người cần trình bày kiến trúc chatbot trong báo cáo/khoá luận/demo."),
             ("Ngày lập", date.today().strftime("%d/%m/%Y")),
-            ("Phạm vi", "Router nhiều lớp, labeled examples, zero-shot/embedding fallback, RAG/embedding, reranker, recommendation scoring, memory, ETA giao hàng, LM Studio rewrite, webhook Messenger, admin cập nhật dữ liệu."),
+            ("Phạm vi", "Pretrained zero-shot router bắt buộc, rule guard, BGE-M3 RAG, BGE reranker, recommendation scoring, memory, ETA giao hàng, LM Studio bắt buộc, readiness frontend, webhook Messenger và admin."),
         ],
     )
 
@@ -73,13 +74,13 @@ def build_report() -> None:
     add_heading(doc, "1. Bức tranh tổng thể", 1)
     add_para(
         doc,
-        "FruitStoreChatbotAI không dùng một mô hình duy nhất để trả lời mọi thứ. Dự án dùng kiến trúc nhiều lớp: lớp đầu vào chuẩn hoá câu hỏi, lớp router nhận dạng ý định, lớp dữ liệu truy xuất sản phẩm/FAQ, lớp recommendation tính điểm sản phẩm, lớp LLM viết lại câu trả lời và lớp guard kiểm tra lại dữ kiện. Cách làm này giúp chatbot vừa linh hoạt như AI, vừa giữ được độ chính xác của dữ liệu cửa hàng.",
+        "FruitStoreChatbotAI không dùng một mô hình duy nhất để trả lời mọi thứ. Dự án dùng kiến trúc nhiều lớp và bắt buộc có pretrained AI cùng LM Studio: router semantic hiểu ý định, BGE-M3 truy xuất dữ liệu, BGE reranker xếp hạng lại, agent nghiệp vụ tạo câu trả lời nền, LM Studio diễn đạt và guard kiểm tra dữ kiện. Database vẫn là nguồn chân lý cho giá, tồn kho và thông tin sản phẩm.",
     )
     add_code_block(
         doc,
         "Input người dùng\n"
         "  -> Chuẩn hoá tiếng Việt/không dấu + alias trái cây\n"
-        "  -> RouterAgent: heuristic/rule guard -> labeled examples -> zero-shot/embedding fallback\n"
+        "  -> RouterAgent: luôn chạy pretrained zero-shot -> rule/labeled guard chọn intent cuối\n"
         "  -> Chọn nhánh xử lý theo intent\n"
         "  -> InventoryAgent / FAQAgent + Delivery ETA / RecommendationAgent\n"
         "  -> HybridRetriever: RAG context + citations\n"
@@ -92,7 +93,7 @@ def build_report() -> None:
         ["Lớp", "Nhiệm vụ", "Input", "Output"],
         [
             ["Text normalization", "Đưa câu hỏi về dạng dễ so khớp.", "Cam Úc còn ko?", "cam uc con ko"],
-            ["Intent router", "Xác định người dùng đang hỏi gì bằng heuristic/rule, labeled examples và model fallback.", "cam còn không", "inventory_check"],
+            ["Intent router", "Luôn chạy pretrained semantic model; rule/labeled guard có thể ghi đè khi tín hiệu nghiệp vụ rõ.", "cam còn không", "inventory_check"],
             ["Business agent", "Tạo câu trả lời nền theo dữ liệu thật.", "inventory_check + cam", "Cam còn 25, giá 65.000đ."],
             ["RAG", "Cung cấp ngữ cảnh sản phẩm/FAQ liên quan.", "query + product index", "snippet/citation liên quan"],
             ["LLM rewrite", "Viết lại cho tự nhiên, ngắn, vui tươi.", "base_answer + RAG", "Có nhé, Cam Úc còn 25..."],
@@ -126,14 +127,14 @@ def build_report() -> None:
         [2300, 3300, 3760],
     )
 
-    add_heading(doc, "3. Router nhiều lớp và zero-shot fallback", 1)
+    add_heading(doc, "3. Router nhiều lớp với pretrained AI bắt buộc", 1)
     add_para(
         doc,
-        "RouterAgent không còn phụ thuộc vào zero-shot ngay từ đầu. Code mới ưu tiên các heuristic chắc chắn trước: chào hỏi, hỏi giá chung, câu đặt hàng, câu có số lượng sản phẩm, hỏi giá/tồn kho theo entity, so sánh, tư vấn, danh sách sản phẩm và FAQ. Sau đó hệ thống thử keyword rules, rồi labeled example router, cuối cùng mới dùng pretrained zero-shot hoặc embedding router làm fallback.",
+        "RouterAgent luôn gọi pretrained semantic backend ngay đầu hàm route cho mọi câu hỏi. Cấu hình mặc định dùng pipeline zero-shot-classification với joeddav/xlm-roberta-large-xnli. Sau khi có kết quả semantic, code vẫn xét heuristic chắc chắn như chào hỏi, giá, số lượng, tồn kho, giao hàng, so sánh và tư vấn; tiếp theo là keyword rules và labeled examples. Những lớp này có thể ghi đè model để bảo vệ logic bán hàng.",
     )
     add_para(
         doc,
-        "Lý do đổi thứ tự là câu bán hàng thường rất ngắn: 'cam còn không', 'lấy 2 táo', 'ship Duy Tân bao lâu'. Các câu này có dấu hiệu nghiệp vụ rõ hơn là tín hiệu semantic dài. Zero-shot vẫn được sử dụng khi các lớp chắc chắn chưa kết luận được; nó so sánh câu hỏi với các nhãn candidate và chỉ được nhận nếu score vượt PRETRAINED_INTENT_MIN_CONFIDENCE.",
+        "Cách tổ chức này đạt hai mục tiêu cùng lúc: mọi input đều được pretrained AI đánh giá, nhưng câu bán hàng ngắn như 'cam còn không', 'lấy 2 táo' hoặc 'ship Duy Tân bao lâu' vẫn được rule bắt chính xác. Nếu không có lớp chắc chắn hơn, kết quả zero-shot được dùng khi score vượt PRETRAINED_INTENT_MIN_CONFIDENCE. Nếu model không tải được hoặc inference lỗi, hệ thống báo lỗi thay vì bỏ qua AI.",
     )
     add_matrix_table(
         doc,
@@ -143,14 +144,14 @@ def build_report() -> None:
             ["Mình lấy 2 táo và 1 cam", "cart_quantity_heuristic", "Có alias trái cây + số lượng.", "inventory_check"],
             ["Trái nào ít chua dưới 100k?", "advisory_heuristic", "Có sở thích + ngân sách.", "recommendation"],
             ["Shop giao Duy Tân bao lâu?", "keyword rule shipping", "Có từ giao/ship/bao lâu.", "faq_shipping"],
-            ["Viết email xin nghỉ phép", "zero-shot hoặc fallback", "Không có tín hiệu trái cây/shop.", "out_of_domain"],
+            ["Viết email xin nghỉ phép", "pretrained zero-shot", "Không có tín hiệu trái cây/shop.", "out_of_domain"],
         ],
         [2550, 2350, 2900, 1560],
     )
     add_callout(
         doc,
         "Điểm cần hiểu",
-        "Zero-shot vẫn có mặt trong dự án, nhưng hiện là một lớp fallback sau rule và labeled examples. Cách này giảm lỗi khi câu có tên sản phẩm/số lượng rất rõ mà model lại phân vân hoặc đoán out_of_domain.",
+        "Pretrained zero-shot luôn được chạy, còn rule guard quyết định ưu tiên đầu ra. Đây không phải cơ chế fallback model: AI là bắt buộc, nhưng kết quả cuối vẫn được kiểm soát bởi tín hiệu nghiệp vụ có độ chính xác cao.",
     )
 
     add_heading(doc, "4. Rule guard và alias trái cây", 1)
@@ -205,7 +206,7 @@ def build_report() -> None:
             "Embedding model chuyển từng đoạn thành vector số.",
             "Khi người dùng hỏi, câu hỏi cũng được chuyển thành vector.",
             "Vector store tính độ tương đồng giữa câu hỏi và các document để lấy top_k đoạn liên quan.",
-            "Nếu bật reranker, CrossEncoderReranker xếp lại các candidate để tăng độ chính xác.",
+            "CrossEncoderReranker bắt buộc xếp lại candidate pool để tăng độ chính xác.",
         ],
     )
     add_matrix_table(
@@ -221,11 +222,10 @@ def build_report() -> None:
     )
     add_callout(
         doc,
-        "Fallback embedding",
-        "Nếu sentence-transformers hoặc model pretrained không tải được, HybridRetriever fallback sang HashingEmbeddingModel. Chất lượng semantic thấp hơn nhưng service vẫn chạy, phù hợp khi demo offline hoặc máy yếu.",
+        "Pretrained retrieval bắt buộc",
+        "HybridRetriever chỉ chấp nhận sentence-transformers với BAAI/bge-m3 và reranker BAAI/bge-reranker-v2-m3. Không có hashing fallback. Nếu một model không tải được hoặc reranking lỗi, chatbot-service không âm thầm chạy ở chất lượng thấp.",
     )
 
-    doc.add_page_break()
     add_heading(doc, "6. RecommendationAgent xử lý tư vấn ra sao?", 1)
     add_para(
         doc,
@@ -270,7 +270,7 @@ def build_report() -> None:
     add_heading(doc, "8. ResponseRewriter và LLM", 1)
     add_para(
         doc,
-        "ResponseRewriter nhận base_answer từ logic nghiệp vụ rồi gọi LM Studio để viết lại. Prompt mới yêu cầu câu trả lời tiếng Việt có dấu, tối đa 2 câu, khoảng 45 từ, trực tiếp câu đầu, vui tươi nhẹ và không bịa dữ kiện. Chat flow truyền allow_follow_up=False nên rewriter loại bỏ câu hỏi gợi mở ở cuối. LM Studio dùng API tương thích OpenAI /chat/completions; nếu không khai báo model name, code có thể tự gọi /models để chọn model chat/instruct không phải embedding.",
+        "ResponseRewriter nhận base_answer từ logic nghiệp vụ rồi bắt buộc gọi LM Studio để viết lại. Prompt yêu cầu tiếng Việt có dấu, tối đa 2 câu, khoảng 45 từ, trực tiếp và không bịa dữ kiện. Khi startup, code gọi /v1/models, xác nhận model cấu hình hoặc tự chọn model chat/instruct, rồi gửi một chat completion probe. Nếu LM Studio không sẵn sàng hoặc rewrite thất bại, API trả 503; không quay về câu nền.",
     )
     add_matrix_table(
         doc,
@@ -302,6 +302,23 @@ def build_report() -> None:
             ["giao Nguyễn Trãi", "{\"area\":null,\"confidence\":0.4,...}", "Bị loại vì không chắc.", "Không đoán khu vực."],
         ],
         [2450, 2850, 2350, 1710],
+    )
+
+    add_heading(doc, "8.2 Fail-fast và readiness từ backend tới frontend", 2)
+    add_para(
+        doc,
+        "Chatbot-service chỉ nhận traffic sau khi toàn bộ AI runtime được khởi tạo thành công. Admin-service dùng build_services=False nên vẫn nhẹ và không cần tải model. Frontend gọi GET /ai/status ngay khi mở trang và lặp lại mỗi 30 giây; ô nhập cùng quick replies bị khóa nếu router, embedding, reranker hoặc LM Studio chưa ready.",
+    )
+    add_code_block(
+        doc,
+        "Chatbot startup\n"
+        "  -> kiểm tra USE_PRETRAINED_INTENT_ROUTER / EMBEDDING_BACKEND / RERANKER\n"
+        "  -> LM Studio: /v1/models + chat completion probe\n"
+        "  -> tải BGE-M3 embedding + BGE reranker\n"
+        "  -> dựng vector index sản phẩm/FAQ\n"
+        "  -> tải pretrained intent router\n"
+        "  -> /health và /ai/status báo ready\n"
+        "  -> frontend mở quyền gửi tin",
     )
 
     add_heading(doc, "9. Ví dụ chạy trọn pipeline", 1)
@@ -371,7 +388,6 @@ def build_report() -> None:
         "Output mẫu: Mình hỗ trợ tốt nhất về trái cây, tồn kho, gợi ý theo vị, giao hàng và đổi trả; bạn hỏi theo nhu cầu mua trái cây nhé.",
     )
 
-    doc.add_page_break()
     add_heading(doc, "10. Admin cập nhật dữ liệu ảnh hưởng chatbot thế nào?", 1)
     add_para(
         doc,
@@ -417,9 +433,9 @@ def build_report() -> None:
             ["FastAPI", "API backend và webhook.", "Nhanh, rõ schema, dễ tách routers/service."],
             ["SQLAlchemy", "ORM cho products, FAQ, conversation.", "Dễ đổi SQLite sang PostgreSQL về sau."],
             ["Pydantic", "Validate request/response.", "Giảm lỗi input khi admin/chat gọi API."],
-            ["transformers", "Zero-shot classification fallback.", "Cho phép nhận intent khi heuristic/rule/labeled examples chưa đủ chắc."],
-            ["sentence-transformers", "Embedding/RAG/reranker.", "Tìm sản phẩm/FAQ theo nghĩa thay vì chỉ keyword."],
-            ["LM Studio", "LLM local/remote OpenAI-compatible.", "Dễ thử model mới mà không đổi code pipeline."],
+            ["transformers", "Zero-shot classification bắt buộc.", "Đánh giá semantic intent cho mọi input trước khi rule chọn kết quả cuối."],
+            ["sentence-transformers", "BGE-M3 embedding và BGE reranker bắt buộc.", "Tìm và xếp hạng sản phẩm/FAQ theo nghĩa thay vì chỉ keyword."],
+            ["LM Studio", "LLM OpenAI-compatible bắt buộc.", "Rewrite mọi output và được probe trước khi service nhận traffic."],
             ["Next.js", "Frontend demo.", "Phù hợp demo chat web và mở rộng UI."],
             ["ngrok", "Public HTTPS local.", "Cần thiết để Meta gọi webhook khi dev local."],
         ],
@@ -429,7 +445,7 @@ def build_report() -> None:
     add_heading(doc, "13. Hạn chế và cách cải tiến mô hình", 1)
     add_para(
         doc,
-        "Các mô hình hiện tại có thể nhận sai khi câu quá ngắn, nhiều lỗi gõ, viết tắt hoặc phụ thuộc ngữ cảnh sâu. Cách cải tiến tốt nhất không phải chỉ đổi model, mà là xây bộ câu test thật từ log Messenger, gán nhãn đúng và đo tỉ lệ đúng sai theo từng intent. Sau đó mới quyết định tune labeled examples, label zero-shot, thêm rule guard, mở rộng alias hay đổi embedding model.",
+        "Các mô hình hiện tại có thể nhận sai khi câu quá ngắn, nhiều lỗi gõ, viết tắt hoặc phụ thuộc ngữ cảnh sâu. Ngoài chất lượng, kiến trúc bắt buộc model pretrained và LM Studio còn làm tăng thời gian startup, RAM/VRAM và yêu cầu giám sát runtime. Cách cải tiến đúng là xây bộ câu test thật, đo accuracy/factuality/latency, rồi tune label, rule, alias, model và tài nguyên dựa trên số liệu.",
     )
     add_bullets(
         doc,
@@ -441,13 +457,14 @@ def build_report() -> None:
             "Thêm evaluation cho delivery ETA: câu địa chỉ rõ, địa chỉ mơ hồ, địa chỉ ngoài khu vực hỗ trợ.",
             "Chuyển gửi Messenger sang background queue để webhook trả 200 nhanh hơn.",
             "Dùng PostgreSQL và persistent vector store khi dữ liệu sản phẩm/FAQ lớn hơn.",
+            "Theo dõi /health và /ai/status, thời gian tải model, RAM/VRAM và độ trễ từng lớp; chuẩn bị khoảng 16 GB RAM cho demo đầy đủ.",
         ],
     )
 
     add_heading(doc, "14. Kết luận", 1)
     add_para(
         doc,
-        "Dự án đang dùng kiến trúc hybrid hợp lý cho chatbot bán hàng: heuristic/rule guard xử lý các câu ngắn, labeled examples bắt các mẫu phổ biến, zero-shot/embedding làm fallback semantic, RAG cung cấp ngữ cảnh dữ liệu, recommendation agent tính điểm theo thuộc tính sản phẩm, delivery ETA xử lý câu hỏi ship theo khu vực, memory giữ sở thích trong phiên, còn LM Studio rewrite làm câu trả lời tự nhiên hơn. Điểm cốt lõi là dữ liệu thật vẫn nằm trong database và agent nghiệp vụ, nhờ đó chatbot có thể vui tươi nhưng không mất kiểm soát.",
+        "Dự án dùng kiến trúc hybrid có kiểm soát: pretrained zero-shot đánh giá mọi input, rule/labeled guard bảo vệ intent nghiệp vụ, BGE-M3 và BGE reranker cung cấp RAG chất lượng cao, recommendation agent tính điểm sản phẩm, delivery ETA xử lý giao hàng, memory giữ sở thích và LM Studio rewrite mọi output. AI là bắt buộc về runtime, nhưng database và agent nghiệp vụ vẫn là nguồn chân lý.",
     )
     add_para(
         doc,
@@ -455,6 +472,7 @@ def build_report() -> None:
     )
 
     configure_sections(doc)
+    disable_proofing(doc)
     doc.save(OUT_FILE)
 
 
