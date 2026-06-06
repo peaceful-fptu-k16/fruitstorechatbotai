@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,43 @@ class ServiceContainer:
     response_rewriter: ResponseRewriter
     inventory_revision: int = 0
 
+    def ai_runtime_status(self, *, probe_lm_studio: bool = True) -> dict[str, Any]:
+        """Describe the required AI runtime for health-aware clients."""
+        settings = get_settings()
+        router_ready = self.router_agent.semantic_backend is not None
+        embedding_ready = self.retriever.supports_deep_learning
+        reranker_ready = self.retriever.reranker is not None
+        lm_studio = self.response_rewriter.runtime_status(probe=probe_lm_studio)
+        ready = router_ready and embedding_ready and reranker_ready and bool(lm_studio["ready"])
+
+        router_model = (
+            settings.pretrained_intent_zero_shot_model_name
+            if settings.pretrained_intent_router_backend.strip().lower().replace("-", "_")
+            in {"zero_shot", "zeroshot"}
+            else settings.pretrained_intent_model_name
+        )
+
+        return {
+            "status": "ready" if ready else "unavailable",
+            "ready": ready,
+            "required": True,
+            "router": {
+                "ready": router_ready,
+                "backend": settings.pretrained_intent_router_backend,
+                "model": router_model,
+            },
+            "embedding": {
+                "ready": embedding_ready,
+                "backend": settings.embedding_backend,
+                "model": settings.embedding_model_name,
+            },
+            "reranker": {
+                "ready": reranker_ready,
+                "model": settings.pretrained_reranker_model_name,
+            },
+            "lm_studio": lm_studio,
+        }
+
 
 class ServiceFactory:
     """Builds the application service graph from settings and database state."""
@@ -33,19 +71,32 @@ class ServiceFactory:
     def build(db: Session) -> ServiceContainer:
         """Instantiate agents and build the first retrieval index from products/FAQ."""
         settings = get_settings()
-        retriever = HybridRetriever()
-        retriever.rebuild_index(db)
+        if not settings.use_pretrained_intent_router:
+            raise RuntimeError("USE_PRETRAINED_INTENT_ROUTER must be true")
+        if settings.embedding_backend.strip().lower() != "sentence_transformers":
+            raise RuntimeError("EMBEDDING_BACKEND must be sentence_transformers")
+        if not settings.use_pretrained_reranker:
+            raise RuntimeError("USE_PRETRAINED_RERANKER must be true")
+        if not settings.lm_studio_base_url.strip():
+            raise RuntimeError("LM_STUDIO_BASE_URL is required")
 
-        memory_agent = MemoryAgent()
         response_rewriter = ResponseRewriter(
             lm_studio_base_url=settings.lm_studio_base_url,
             lm_studio_model_name=settings.lm_studio_model_name,
             lm_studio_timeout_seconds=settings.lm_studio_timeout_seconds,
             lm_studio_temperature=settings.lm_studio_temperature,
         )
+        response_rewriter.ensure_ready()
+
+        retriever = HybridRetriever()
+        retriever.ensure_ready()
+        retriever.rebuild_index(db)
+
+        memory_agent = MemoryAgent()
         return ServiceContainer(
             router_agent=RouterAgent(
                 use_pretrained_router=settings.use_pretrained_intent_router,
+                require_pretrained_router=True,
                 router_backend=settings.pretrained_intent_router_backend,
                 model_name=settings.pretrained_intent_model_name,
                 zero_shot_model_name=settings.pretrained_intent_zero_shot_model_name,

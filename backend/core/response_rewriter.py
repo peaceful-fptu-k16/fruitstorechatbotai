@@ -107,13 +107,13 @@ def _finalize_concise_answer(
 
 
 class ResponseRewriter:
-    """Optional LM Studio adapter that rewrites deterministic answers safely."""
+    """Required LM Studio adapter that rewrites grounded deterministic answers."""
     def __init__(
         self,
         *,
         lm_studio_base_url: str = "http://localhost:1234/v1",
         lm_studio_model_name: str = "",
-        lm_studio_timeout_seconds: float = 15.0,
+        lm_studio_timeout_seconds: float = 60.0,
         lm_studio_temperature: float = 0.2,
     ) -> None:
         self.lm_studio_base_url = lm_studio_base_url.rstrip("/")
@@ -122,6 +122,59 @@ class ResponseRewriter:
         self.lm_studio_temperature = lm_studio_temperature
         self._last_lm_studio_error = ""
         self._autodetected_lm_studio_model_name = ""
+
+    @property
+    def active_model_name(self) -> str:
+        return self.lm_studio_model_name or self._autodetected_lm_studio_model_name
+
+    def ensure_ready(self) -> str:
+        """Verify model discovery and the chat completion endpoint before startup completes."""
+        if not self._can_use_lm_studio():
+            raise RuntimeError("LM Studio is required; configure LM_STUDIO_BASE_URL")
+
+        model_ids = self._fetch_lm_studio_model_ids()
+        if not model_ids:
+            detail = self._last_lm_studio_error or "LM Studio did not return any loaded models"
+            raise RuntimeError(detail)
+
+        if self.lm_studio_model_name:
+            if self.lm_studio_model_name not in model_ids:
+                raise RuntimeError(
+                    f"Configured LM Studio model '{self.lm_studio_model_name}' is not loaded"
+                )
+        else:
+            chat_candidates = [name for name in model_ids if not self._is_embedding_model_name(name)]
+            if not chat_candidates:
+                raise RuntimeError("LM Studio has no loaded chat/instruct model")
+            self._autodetected_lm_studio_model_name = chat_candidates[0]
+
+        probe = self._call_lm_studio(
+            prompt="Reply with exactly READY.",
+            max_tokens=8,
+        )
+        if not probe:
+            detail = self._last_lm_studio_error or "LM Studio chat completion probe failed"
+            raise RuntimeError(detail)
+
+        return self.active_model_name
+
+    def runtime_status(self, *, probe: bool = True) -> dict[str, Any]:
+        """Return a frontend-safe LM Studio readiness snapshot."""
+        ready = bool(self.active_model_name and self._can_use_lm_studio())
+        error = ""
+
+        if probe:
+            model_ids = self._fetch_lm_studio_model_ids()
+            active_model = self.active_model_name
+            ready = bool(active_model and active_model in model_ids)
+            if not ready:
+                error = self._last_lm_studio_error or "LM Studio model is not available"
+
+        return {
+            "ready": ready,
+            "model": self.active_model_name,
+            "error": error,
+        }
 
     def rewrite(
         self,
@@ -139,14 +192,7 @@ class ResponseRewriter:
             return base_answer, "none"
 
         if not self._can_use_lm_studio():
-            return (
-                _finalize_concise_answer(
-                    cleaned,
-                    allow_follow_up=allow_follow_up,
-                    max_words=_MAX_REWRITE_WORDS_BY_INTENT.get(intent, _MAX_REWRITE_WORDS),
-                ),
-                "base",
-            )
+            raise RuntimeError("LM Studio is required but LM_STUDIO_BASE_URL is not configured")
 
         grounding_context = self._prepare_grounding_context(rag_context)
         lm_answer = self._rewrite_with_lm_studio(
@@ -338,14 +384,19 @@ class ResponseRewriter:
                 response = client.get(url)
                 response.raise_for_status()
                 payload = response.json()
-        except Exception:
+        except Exception as exc:
+            self._last_lm_studio_error = (
+                f"Cannot query LM Studio models at {url}: {type(exc).__name__}: {exc}"
+            )
             return []
 
         if not isinstance(payload, dict):
+            self._last_lm_studio_error = "LM Studio models endpoint returned a non-object payload"
             return []
 
         data = payload.get("data")
         if not isinstance(data, list):
+            self._last_lm_studio_error = "LM Studio models endpoint returned no model list"
             return []
 
         model_ids: list[str] = []
@@ -356,6 +407,7 @@ class ResponseRewriter:
             if isinstance(model_id, str) and model_id.strip():
                 model_ids.append(model_id.strip())
 
+        self._last_lm_studio_error = ""
         return model_ids
 
     @staticmethod

@@ -1,5 +1,6 @@
 from backend.api.admin import router as admin_router
 from backend.api.admin_ui import router as admin_ui_router
+from backend.api.ai import router as ai_router
 from backend.api.chat import router as chat_router
 from backend.api.facebook import router as facebook_router
 from backend.api.inventory import router as inventory_router
@@ -17,6 +18,7 @@ app = create_app(
     routers=(
         admin_ui_router,
         admin_router,
+        ai_router,
         facebook_router,
         chat_router,
         products_router,

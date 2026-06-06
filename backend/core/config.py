@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     reranker_candidate_pool: int = 30
     lm_studio_base_url: str = "http://localhost:1234/v1"
     lm_studio_model_name: str = ""
-    lm_studio_timeout_seconds: float = 15.0
+    lm_studio_timeout_seconds: float = 60.0
     lm_studio_temperature: float = 0.2
     enable_user_query_logging: bool = True
     user_query_log_path: str = "ai_log/user_questions.jsonl"

@@ -18,7 +18,7 @@ def _format_vnd(price: int) -> str:
 
 
 def _build_recommend_rag_context(*, query: str, products: list[Product], retriever: object) -> list[str]:
-    """Build compact product/RAG facts for the optional answer rewriter."""
+    """Build compact product/RAG facts for the required LM Studio rewriter."""
     raw_lines: list[str] = []
 
     try:

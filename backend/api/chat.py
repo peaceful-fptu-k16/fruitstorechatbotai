@@ -637,7 +637,10 @@ def handle_chat_request(
 
     services.memory_agent.update_from_message(payload.session_id, payload.message)
     route_input = _build_router_message(user_message=payload.message, session_id=payload.session_id, db=db)
-    route = services.router_agent.route(route_input)
+    try:
+        route = services.router_agent.route(route_input)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     products: list[Product] = []
     citations: list[CitationOut] = []

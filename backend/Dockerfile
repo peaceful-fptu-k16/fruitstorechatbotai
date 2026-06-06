@@ -5,11 +5,8 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-ARG BACKEND_REQUIREMENTS_FILE=backend/requirements.docker.txt
-
 COPY backend/requirements.txt /app/backend/requirements.txt
-COPY backend/requirements.docker.txt /app/backend/requirements.docker.txt
-RUN pip install --no-cache-dir -r /app/${BACKEND_REQUIREMENTS_FILE}
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
 

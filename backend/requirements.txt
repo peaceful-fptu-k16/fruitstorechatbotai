@@ -7,6 +7,7 @@ python-dotenv==1.1.1
 numpy==2.2.6
 sentence-transformers==3.0.1
 transformers==4.57.1
+sentencepiece==0.2.1
 httpx==0.28.1
 # Optional for production vector storage integration:
 # chromadb==0.5.7

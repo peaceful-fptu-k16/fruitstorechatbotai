@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from backend.core.config import get_settings
 from backend.core.services import ServiceFactory
@@ -53,8 +54,19 @@ def create_app(
         }
 
     @app.get("/health")
-    def health() -> dict:
-        """Return a stable health payload for Docker and load balancers."""
-        return {"status": "healthy"}
+    def health():
+        """Report service health and required AI readiness when agents are enabled."""
+        services = getattr(app.state, "services", None)
+        if services is None:
+            return {"status": "healthy"}
+
+        ai_status = services.ai_runtime_status(probe_lm_studio=True)
+        if not ai_status["ready"]:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unhealthy", "ai": ai_status},
+            )
+
+        return {"status": "healthy", "ai": ai_status}
 
     return app

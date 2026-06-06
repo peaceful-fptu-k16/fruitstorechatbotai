@@ -227,12 +227,32 @@ async def receive_webhook(
             postback = event.get("postback") or {}
             postback_payload = postback.get("payload")
             text = message.get("text")
+            requires_rewrite = False
+            rewrite_intent = "out_of_domain"
+            rewrite_message = ""
+            rewrite_context: list[str] = []
             if isinstance(postback_payload, str) and postback_payload.strip():
                 postback_text, postback_products = _handle_product_postback(postback_payload.strip(), db=db)
                 reply_text = postback_text
                 product_cards = _build_product_template_elements(postback_products, settings=settings)
+                requires_rewrite = True
+                rewrite_message = postback_payload.strip()
+                rewrite_intent = (
+                    "order_support"
+                    if ":ORDER:" in rewrite_message or ":ADD_TO_CART:" in rewrite_message
+                    else "inventory_check"
+                )
+                rewrite_context = [
+                    (
+                        f"{product.name}: giá {_format_vnd(product.price)}, "
+                        f"còn {product.stock}, {product.description}"
+                    )
+                    for product in postback_products
+                ]
             elif not isinstance(text, str) or not text.strip():
                 reply_text = "Hien tai shop ho tro tu van bang tin nhan van ban. Ban gui nhu cau mua hoa qua giup minh nhe."
+                requires_rewrite = True
+                rewrite_message = "Người dùng gửi nội dung không phải văn bản."
             else:
                 chat_response = handle_chat_request(
                     ChatRequest(
@@ -247,6 +267,19 @@ async def receive_webhook(
                 )
                 reply_text = chat_response.answer
                 product_cards = _build_product_template_elements(chat_response.products, settings=settings)
+
+            if requires_rewrite:
+                try:
+                    reply_text, _ = request.app.state.services.response_rewriter.rewrite(
+                        base_answer=reply_text,
+                        user_message=rewrite_message,
+                        intent=rewrite_intent,
+                        session_id=f"facebook:{sender_id}",
+                        allow_follow_up=False,
+                        rag_context=rewrite_context,
+                    )
+                except RuntimeError as exc:
+                    raise HTTPException(status_code=503, detail=str(exc)) from exc
 
             try:
                 messenger.send_text(recipient_id=sender_id, text=reply_text)

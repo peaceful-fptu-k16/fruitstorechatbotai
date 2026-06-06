@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import type { ChatResponse, Product } from "@/lib/api-client";
-import { sendChatMessage } from "@/lib/api-client";
+import type { AiRuntimeStatus, ChatResponse, Product } from "@/lib/api-client";
+import { fetchAiRuntimeStatus, sendChatMessage } from "@/lib/api-client";
 
 import { ProductCard } from "./product-card";
 import { QuickReplies } from "./quick-replies";
@@ -161,6 +161,8 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiStatus, setAiStatus] = useState<AiRuntimeStatus | null>(null);
+  const [aiStatusError, setAiStatusError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -173,7 +175,42 @@ export function ChatPanel() {
     setSessionId(buildSessionId());
   }, []);
 
-  const canSend = input.trim().length > 0 && !loading;
+  useEffect(() => {
+    let active = true;
+
+    async function refreshAiStatus() {
+      try {
+        const status = await fetchAiRuntimeStatus();
+        if (!active) return;
+        setAiStatus(status);
+        setAiStatusError(status.ready ? null : status.lm_studio.error || "AI runtime chưa sẵn sàng.");
+      } catch (statusError) {
+        if (!active) return;
+        setAiStatus(null);
+        setAiStatusError(
+          statusError instanceof Error
+            ? statusError.message
+            : "Không thể kiểm tra trạng thái AI runtime."
+        );
+      }
+    }
+
+    void refreshAiStatus();
+    const intervalId = window.setInterval(refreshAiStatus, 30_000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  const aiReady = aiStatus?.ready === true;
+  const canSend = input.trim().length > 0 && !loading && aiReady;
+  const aiStatusLabel = aiReady
+    ? "Pretrained AI và LM Studio sẵn sàng"
+    : aiStatusError
+      ? "AI runtime chưa sẵn sàng"
+      : "Đang kiểm tra AI runtime";
 
   const productPanelContext = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -276,16 +313,35 @@ export function ChatPanel() {
           <div className="flex items-center gap-3">
             <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-xl shadow-md">
               🍊
-              <span className="status-pulse absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white bg-leaf" />
+              <span
+                className={`absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white ${
+                  aiReady ? "status-pulse bg-leaf" : "bg-amber-400"
+                }`}
+              />
             </div>
             <div>
               <h2 className="text-sm font-bold text-ink">Trợ lý Hoa Quả Tươi</h2>
-              <p className="text-xs text-ink/45">Đang hoạt động · Phản hồi tức thì</p>
+              <p className={`text-xs ${aiReady ? "text-leaf" : "text-amber-700"}`}>
+                {aiStatusLabel}
+              </p>
             </div>
           </div>
           <span className="rounded-full bg-white/75 px-3 py-1 text-[11px] font-mono font-medium text-ink/50 shadow-sm">
             #{sessionId.slice(0, 6).toUpperCase()}
           </span>
+        </div>
+
+        <div className="border-b border-accent/10 bg-white/45 px-5 py-2 text-[10px] text-ink/50">
+          {aiReady && aiStatus ? (
+            <span>
+              Router: {aiStatus.router.backend} · Embedding: {aiStatus.embedding.model} ·
+              Reranker: {aiStatus.reranker.model} · LLM: {aiStatus.lm_studio.model}
+            </span>
+          ) : (
+            <span>
+              Chat chỉ hoạt động khi pretrained router, embedding, reranker và LM Studio đều khả dụng.
+            </span>
+          )}
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4">
@@ -347,7 +403,7 @@ export function ChatPanel() {
         </div>
 
         <div className="px-4 pt-1">
-          <QuickReplies options={QUICK_OPTIONS} onPick={submitMessage} disabled={loading} />
+          <QuickReplies options={QUICK_OPTIONS} onPick={submitMessage} disabled={loading || !aiReady} />
         </div>
 
         <div className="border-t border-accent/10 bg-white/55 px-3 py-3">
@@ -362,8 +418,9 @@ export function ChatPanel() {
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              disabled={!aiReady}
               placeholder="Ví dụ: Có trái nào ít chua dưới 100k không?"
-              className="flex-1 rounded-xl border border-accent/25 bg-white/85 px-4 py-2.5 text-sm text-ink outline-none transition focus:border-accent/55 focus:ring-2 focus:ring-accent/18"
+              className="flex-1 rounded-xl border border-accent/25 bg-white/85 px-4 py-2.5 text-sm text-ink outline-none transition focus:border-accent/55 focus:ring-2 focus:ring-accent/18 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-ink/40"
             />
             <button
               type="submit"
@@ -388,6 +445,11 @@ export function ChatPanel() {
                 <path fillRule="evenodd" d="M8 15A7 7 0 108 1a7 7 0 000 14zm0-10a.75.75 0 01.75.75v4a.75.75 0 01-1.5 0v-4A.75.75 0 018 5zm0 7.5a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
               </svg>
               {error}
+            </p>
+          )}
+          {!aiReady && aiStatusError && (
+            <p className="mt-2 text-xs leading-relaxed text-amber-700">
+              {aiStatusError}
             </p>
           )}
         </div>

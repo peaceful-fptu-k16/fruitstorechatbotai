@@ -6,13 +6,13 @@ from sqlalchemy.orm import Session
 
 from backend.core.config import get_settings
 from backend.database.queries import list_faq_documents, list_products
-from backend.rag.embeddings import BaseEmbeddingModel, HashingEmbeddingModel, SentenceTransformerEmbeddingModel
+from backend.rag.embeddings import BaseEmbeddingModel, SentenceTransformerEmbeddingModel
 from backend.rag.reranker import BaseReranker, CrossEncoderReranker
 from backend.rag.vector_store import InMemoryVectorStore, VectorDocument
 
 
 class HybridRetriever:
-    """Product/FAQ retriever with lightweight hashing and optional pretrained rerank."""
+    """Product/FAQ retriever backed by required pretrained embedding and reranking models."""
     def __init__(self) -> None:
         self.settings = get_settings()
         self.embedding_model = self._build_embedding_model()
@@ -27,35 +27,39 @@ class HybridRetriever:
         return isinstance(self.embedding_model, SentenceTransformerEmbeddingModel)
 
     def _build_embedding_model(self) -> BaseEmbeddingModel:
-        """Prefer configured embeddings, but keep the app online with hashing fallback."""
+        """Load the required sentence-transformers embedding model."""
         backend = self.settings.embedding_backend.strip().lower()
+        if backend != "sentence_transformers":
+            raise RuntimeError(
+                "Pretrained embeddings are required; set EMBEDDING_BACKEND=sentence_transformers"
+            )
 
-        if backend == "sentence_transformers":
-            try:
-                return SentenceTransformerEmbeddingModel(
-                    model_name=self.settings.embedding_model_name,
-                    local_files_only=not self.settings.allow_remote_model_download,
-                )
-            except Exception:
-                # Fall back to deterministic hashing embeddings when pretrained model
-                # cannot be loaded (missing package, network/model cache issue, etc.).
-                return HashingEmbeddingModel(dim=256)
-
-        return HashingEmbeddingModel(dim=256)
+        try:
+            return SentenceTransformerEmbeddingModel(
+                model_name=self.settings.embedding_model_name,
+                local_files_only=not self.settings.allow_remote_model_download,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load required embedding model {self.settings.embedding_model_name}: {exc}"
+            ) from exc
 
     def _build_reranker(self) -> Optional[BaseReranker]:
-        """Lazily create the cross-encoder reranker when enabled and available."""
+        """Create the required cross-encoder reranker."""
         if not self.settings.use_pretrained_reranker:
-            return None
+            raise RuntimeError(
+                "Pretrained reranking is required; set USE_PRETRAINED_RERANKER=true"
+            )
 
         try:
             return CrossEncoderReranker(
                 model_name=self.settings.pretrained_reranker_model_name,
                 local_files_only=not self.settings.allow_remote_model_download,
             )
-        except Exception:
-            # Keep retrieval online even if reranker model cannot be loaded.
-            return None
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load required reranker model {self.settings.pretrained_reranker_model_name}: {exc}"
+            ) from exc
 
     def _ensure_reranker_loaded(self) -> Optional[BaseReranker]:
         """Attempt reranker loading once per process to avoid repeated slow failures."""
@@ -69,10 +73,19 @@ class HybridRetriever:
         self.reranker = self._build_reranker()
         return self.reranker
 
+    def ensure_ready(self) -> None:
+        """Preload the reranker so startup fails before the service accepts traffic."""
+        if not isinstance(self.embedding_model, SentenceTransformerEmbeddingModel):
+            raise RuntimeError("Required pretrained embedding model is not active")
+        if self._ensure_reranker_loaded() is None:
+            raise RuntimeError("Required pretrained reranker is not active")
+
     def _rerank_results(self, query: str, results: list[dict], *, top_k: int) -> list[dict]:
         """Apply cross-encoder scores to the top vector candidates."""
-        if self.reranker is None or not results:
+        if not results:
             return results[:top_k]
+        if self.reranker is None:
+            raise RuntimeError("Required pretrained reranker is not active")
 
         candidate_pool = min(len(results), max(top_k, self.reranker_candidate_pool))
         candidates = results[:candidate_pool]
@@ -80,11 +93,11 @@ class HybridRetriever:
 
         try:
             reranked = self.reranker.rerank(query, docs, top_k=min(top_k, len(candidates)))
-        except Exception:
-            return results[:top_k]
+        except Exception as exc:
+            raise RuntimeError(f"Pretrained reranker inference failed: {exc}") from exc
 
         if not reranked:
-            return results[:top_k]
+            raise RuntimeError("Pretrained reranker returned no results")
 
         by_id = {item["id"]: item for item in candidates}
         ordered: list[dict] = []
@@ -104,7 +117,9 @@ class HybridRetriever:
                 }
             )
 
-        return ordered if ordered else results[:top_k]
+        if not ordered:
+            raise RuntimeError("Pretrained reranker returned no usable documents")
+        return ordered
 
     def rebuild_index(self, db: Session) -> None:
         """Recreate the in-memory vector index from current products and FAQ rows."""
@@ -146,7 +161,7 @@ class HybridRetriever:
         """Search by vector similarity, then rerank when a reranker is available."""
         reranker = self._ensure_reranker_loaded()
         if reranker is None:
-            return self.vector_store.similarity_search(query, top_k=top_k, scope=scope)
+            raise RuntimeError("Required pretrained reranker is not active")
 
         raw_top_k = max(top_k, self.reranker_candidate_pool)
         initial = self.vector_store.similarity_search(query, top_k=raw_top_k, scope=scope)

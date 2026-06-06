@@ -40,9 +40,34 @@ export interface ChatResponse {
   fallback: boolean;
 }
 
+export interface AiRuntimeStatus {
+  status: "ready" | "unavailable";
+  ready: boolean;
+  required: boolean;
+  router: {
+    ready: boolean;
+    backend: string;
+    model: string;
+  };
+  embedding: {
+    ready: boolean;
+    backend: string;
+    model: string;
+  };
+  reranker: {
+    ready: boolean;
+    model: string;
+  };
+  lm_studio: {
+    ready: boolean;
+    model: string;
+    error: string;
+  };
+}
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ??
-  "http://localhost:8000";
+  "http://localhost:8001";
 
 const WINDOWS_1252_REVERSE: Record<number, number> = {
   0x20ac: 0x80,
@@ -139,7 +164,16 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(repairMojibakeText(text) || `Request failed with status ${response.status}`);
+    let detail = text;
+    try {
+      const payload = JSON.parse(text) as { detail?: unknown };
+      if (typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+    } catch {
+      // Keep the original response body when it is not JSON.
+    }
+    throw new Error(repairMojibakeText(detail) || `Request failed with status ${response.status}`);
   }
 
   return repairResponseStrings(await response.json()) as T;
@@ -156,6 +190,11 @@ export async function sendChatMessage(payload: {
     method: "POST",
     body: JSON.stringify({ ...payload, language: payload.language ?? "vi" }),
   });
+}
+
+/** Fetch the required pretrained AI and LM Studio runtime state. */
+export async function fetchAiRuntimeStatus(): Promise<AiRuntimeStatus> {
+  return requestJson<AiRuntimeStatus>("/ai/status");
 }
 
 /** Fetch catalog products for product panels or standalone views. */

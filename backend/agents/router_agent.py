@@ -343,7 +343,7 @@ class Rule:
 
 
 class SemanticIntentBackend(Protocol):
-    """Protocol for optional semantic intent classifiers."""
+    """Protocol for the required semantic intent classifier."""
     def predict_intent(self, message: str) -> Optional[tuple[str, float]]:
         ...
 
@@ -409,7 +409,7 @@ class PretrainedSemanticIntentBackend:
 
 
 class ZeroShotIntentBackend:
-    """Optional Hugging Face zero-shot classifier for intent routing."""
+    """Hugging Face zero-shot classifier for required intent routing."""
     def __init__(
         self,
         *,
@@ -460,7 +460,7 @@ class ZeroShotIntentBackend:
 
 
 class RouterAgent:
-    """Layered router: high-precision heuristics first, semantic fallback last."""
+    """Layered router that always evaluates pretrained semantics before rule guards."""
     @staticmethod
     def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
         return any(keyword in text for keyword in keywords)
@@ -566,6 +566,7 @@ class RouterAgent:
         self,
         *,
         use_pretrained_router: bool = True,
+        require_pretrained_router: bool = True,
         model_name: str = "BAAI/bge-m3",
         router_backend: str = "zero_shot",
         zero_shot_model_name: str = "joeddav/xlm-roberta-large-xnli",
@@ -578,6 +579,7 @@ class RouterAgent:
         self.zero_shot_model_name = zero_shot_model_name
         self.min_intent_confidence = min_intent_confidence
         self.local_files_only = local_files_only
+        self.require_pretrained_router = require_pretrained_router
 
         self.rules: tuple[Rule, ...] = (
             Rule(
@@ -680,12 +682,18 @@ class RouterAgent:
             ),
         )
 
+        if self.require_pretrained_router and not use_pretrained_router:
+            raise RuntimeError("Pretrained intent router is required but USE_PRETRAINED_INTENT_ROUTER is disabled")
+
         if self.semantic_backend is None and use_pretrained_router:
             self.semantic_backend = self._build_pretrained_backend(
                 model_name=model_name,
                 router_backend=router_backend,
                 zero_shot_model_name=zero_shot_model_name,
             )
+
+        if self.require_pretrained_router and self.semantic_backend is None:
+            raise RuntimeError("Pretrained intent router could not be initialized")
 
     def _build_pretrained_backend(
         self,
@@ -694,7 +702,7 @@ class RouterAgent:
         router_backend: str,
         zero_shot_model_name: str,
     ) -> Optional[SemanticIntentBackend]:
-        """Create the configured semantic backend, falling back silently on failure."""
+        """Create the configured semantic intent backend."""
         normalized_backend = normalize_text(router_backend).replace("-", "_")
         try:
             if normalized_backend in {"zero_shot", "zeroshot"}:
@@ -704,7 +712,10 @@ class RouterAgent:
                 )
             return PretrainedSemanticIntentBackend(model_name=model_name, local_files_only=self.local_files_only)
         except Exception as exc:
-            # Fall back to deterministic rules if pretrained model cannot be loaded.
+            if self.require_pretrained_router:
+                raise RuntimeError(
+                    f"Failed to load required pretrained intent router ({normalized_backend}): {exc}"
+                ) from exc
             logger.warning("Pretrained router (%s) disabled due to load failure: %s", normalized_backend, exc)
             return None
 
@@ -733,7 +744,9 @@ class RouterAgent:
                 raw_candidates = predict_top_k(message, top_k=top_k)
             except TypeError:
                 raw_candidates = predict_top_k(message)
-            except Exception:
+            except Exception as exc:
+                if self.require_pretrained_router:
+                    raise RuntimeError(f"Pretrained intent router inference failed: {exc}") from exc
                 raw_candidates = []
 
             candidates: list[tuple[str, float]] = []
@@ -750,7 +763,9 @@ class RouterAgent:
 
         try:
             prediction = self.semantic_backend.predict_intent(message)
-        except Exception:
+        except Exception as exc:
+            if self.require_pretrained_router:
+                raise RuntimeError(f"Pretrained intent router inference failed: {exc}") from exc
             return []
 
         if prediction is None:
@@ -811,6 +826,7 @@ class RouterAgent:
         """Classify one user message into the internal intent taxonomy."""
         message = normalize_text(user_message)
         has_fruit_entity = self._has_fruit_entity(message)
+        pretrained_result = self._route_with_pretrained_router(user_message)
 
         greeting_patterns = ("hello", "xin chao", "chao shop", "alo", "helo")
         if self._contains_any(message, greeting_patterns):
@@ -933,7 +949,6 @@ class RouterAgent:
         if labeled_result is not None:
             return labeled_result
 
-        pretrained_result = self._route_with_pretrained_router(user_message)
         if pretrained_result is not None:
             return pretrained_result
 

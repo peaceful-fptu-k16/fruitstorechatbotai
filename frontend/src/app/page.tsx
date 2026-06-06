@@ -28,8 +28,8 @@ export default function HomePage() {
 
       <header className="page-in mb-10 text-center">
         <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-accent-light px-4 py-1.5 text-sm font-semibold text-accent shadow-sm">
-          <span className="status-pulse inline-block h-2.5 w-2.5 rounded-full bg-leaf" />
-          Chatbot AI · Đang hoạt động
+          <span className="inline-block h-2.5 w-2.5 rounded-full bg-accent-2" />
+          Pretrained AI · RAG · LM Studio
         </div>
 
         <h1 className="mb-4 text-4xl font-bold leading-tight tracking-tight md:text-6xl lg:text-7xl">
